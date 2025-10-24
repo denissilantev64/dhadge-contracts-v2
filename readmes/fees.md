@@ -52,20 +52,44 @@
 ## 4. Комиссии при действиях пользователей
 
 ### 4.1 Депозит (`deposit`, `depositFor`, `depositForWithCustomCooldown` → `_depositFor`)
-Порядок действий при каждом депозите:
-1. Проверяются права/списки, валидность актива и отсутствие NFT (ERC721) через `supportsInterface`.【F:contracts/PoolLogic.sol†L266-L283】
-2. **Перед начислением долей** пул вызывает `_mintManagerFee()` — это гарантирует, что все начисленные ранее комиссии будут сминчены до изменения `totalSupply`. Возвращённое значение `fundValue` используется для рассчёта цены доли до депозита.【F:contracts/PoolLogic.sol†L285-L288】【F:contracts/PoolLogic.sol†L787-L800】
-3. Токены переводятся в пул, рассчитывается их стоимость `usdAmount = _assetValue(_asset, _amount)` (USD × 1e18). Затем высчитывается базовое количество долей `liquidityMinted`: если supply > 0 — пропорционально текущей цене, иначе 1:1 к USD (старт пула).【F:contracts/PoolLogic.sol†L289-L301】
-4. **Entry fee**: если `entryFeeNumerator > 0`, вычисляется `entryFee = liquidityMinted * entryFeeNumerator / denominator`. Эта сумма минтится менеджеру, а доли инвестора уменьшаются на величину комиссии. Комиссия берётся в токенах пула и не затрагивает активы. Эмитится `EntryFeeMinted`.【F:contracts/PoolLogic.sol†L303-L314】
-5. Проводятся проверки на минимальный выпуск (`≥ 100000`), затем доли инвестора минтятся. Обновляются `lastExitCooldown` и `lastDeposit`, рассчитывается баланс и выполняется проверка `minDepositUSD`. Эмитится событие `Deposit`.【F:contracts/PoolLogic.sol†L316-L358】
-6. Суммарная стоимость пула увеличивается на `usdAmount` (т.е. актив вносится полностью, entry fee не уменьшает активы внутри пула).【F:contracts/PoolLogic.sol†L335-L345】
+
+#### 4.1.1 Параметры и предусловия
+- **`_recipient`** — конечный получатель долей пула. Должен быть менеджером, участником whitelist (если пул приватный) или любым адресом в публичных пулах. Для вызова `depositForWithCustomCooldown` дополнительно проверяется whitelist фабрики, разрешающий передачу пользовательского cooldown.【F:contracts/PoolLogic.sol†L250-L333】【F:contracts/PoolFactory.sol†L128-L135】
+- **`_asset`** — адрес депонируемого ERC20. Контракт убеждается, что актив разрешён для депозита (`isDepositAsset`) и не реализует интерфейс ERC721 (NFT), вызывая `supportsInterface` с ограничением по газу. Только активы из списка `supportedAssets` допускаются к внесению.【F:contracts/PoolLogic.sol†L269-L283】【F:contracts/PoolManagerLogic.sol†L189-L207】
+- **`_amount`** — количество токенов `_asset`, которое переводится на баланс пула. Для успешного депозита пользователь обязан заранее выставить allowance; фактический перевод выполняется через безопасный `tryAssemblyCall` к `transferFrom`.【F:contracts/PoolLogic.sol†L289-L301】
+- **`_cooldown`** — длительность локапа для пользовательской версии депозита. Значение должно находиться в диапазоне `[5 минут; _exitCooldown()]`, иначе операция отклоняется. Стандартные функции (`deposit`, `depositFor`) используют глобальный cooldown из фабрики.【F:contracts/PoolLogic.sol†L250-L333】【F:contracts/PoolFactory.sol†L206-L226】
+
+#### 4.1.2 Формулы выпуска долей
+1. До внесения активов пул вызывает `_mintManagerFee()`, чтобы «кристаллизовать» накопленные комиссии и зафиксировать актуальные `fundValue` и `totalSupply`. Это защищает существующих держателей от размывания долей новыми депозитами.【F:contracts/PoolLogic.sol†L285-L288】【F:contracts/PoolLogic.sol†L787-L805】
+2. Стоимость входящего актива оценивается как `usdAmount = _assetValue(_asset, _amount)` (USD × 1e18). Если supply уже существует, базовое количество долей рассчитывается пропорционально цене: `liquidityMintedBase = usdAmount * totalSupplyBefore / fundValue`. Для первого депозита (нулевой supply) используется линейная конверсия `liquidityMintedBase = usdAmount`.【F:contracts/PoolLogic.sol†L289-L301】
+3. **Entry fee** применяется при положительном `entryFeeNumerator`: `entryFee = liquidityMintedBase * entryFeeNumerator / denominator`. Комиссия минтится менеджеру, после чего инвестор получает `liquidityMinted = liquidityMintedBase - entryFee`. Комиссия выплачивается исключительно в токенах пула и не уменьшает объём активов под управлением.【F:contracts/PoolLogic.sol†L303-L314】
+4. Прежде чем минтить доли инвестору, контракт проверяет ограничение `liquidityMinted ≥ 100000`, предотвращая атаки инфляции через микродепозиты и обеспечивая стабильность расчётов. Только после этого `_recipient` получает новые токены пула.【F:contracts/PoolLogic.sol†L316-L323】
+
+#### 4.1.3 Побочные эффекты и события
+- После выпуска долей пересчитываются `lastExitCooldown` и `lastDeposit` для адреса инвестора, учитывая сумму нового выпуска и выбранный cooldown. Это позволяет системе корректно блокировать быстрые выводы после депозита.【F:contracts/PoolLogic.sol†L325-L333】
+- Проверка `minDepositUSD` гарантирует, что совокупная стоимость долей пользователя после операции не опускается ниже минимального порога, заданного менеджером. Нарушение условия приводит к отмене транзакции, что защищает пулы с KYC/AML-требованиями от дробления долей.【F:contracts/PoolLogic.sol†L335-L345】【F:contracts/PoolManagerLogic.sol†L221-L247】
+- Событие `Deposit` логирует актив, сумму в USD, количество выпущенных долей, итоговый баланс инвестора и обновлённое значение `fundValue`. Если комиссия взималась, параллельно эмитится `EntryFeeMinted`. В завершение вызывается `_emitFactoryEvent()` для синхронизации с фабрикой пула.【F:contracts/PoolLogic.sol†L313-L362】
+- Итоговая стоимость пула увеличивается ровно на `usdAmount`, поскольку entry fee выплачивается за счёт дополнительных токенов, а не из депонированного актива.【F:contracts/PoolLogic.sol†L335-L345】
 
 ### 4.2 Вывод (`withdraw`, `withdrawTo`, `withdrawSafe`, `withdrawToSafe` → `_withdrawTo`)
-1. Проверяется истечение cooldown и достаточность долей. Для контроля консистентности рассчитывается `execution.supplyAfterBurn = totalSupply - amount`, с проверкой порога `100000`, если остаток не ноль.【F:contracts/PoolLogic.sol†L417-L429】
-2. Перед распределением активов вызывается `_mintManagerFee()` — комиссии за период между депозитом и выводом начисляются заранее.【F:contracts/PoolLogic.sol†L431-L433】
-3. **Exit fee**: если заданы ставки, вычисляется `exitFee = fundTokens * exitFeeNumerator / denominator`. Комиссия удерживается из долей выводящего (т.е. `_fundTokenAmount` уменьшается), эквивалентная сумма переводится менеджеру, и эмитится `ExitFeeMinted`. Из-за удержания supply после вычитания возвращается на исходный уровень, чтобы сохранить цену доли.【F:contracts/PoolLogic.sol†L434-L448】
-4. Рассчитывается пропорция `portion = _fundTokenAmount * 1e18 / totalSupply()`, сжигаются доли инвестора. Если в результате `totalSupply() == 0`, high-water mark сбрасывается в `1e18`.【F:contracts/PoolLogic.sol†L451-L459】
-5. Для каждого поддерживаемого актива рассчитывается доля, выполняется обработка guard’ами и перевод активов пользователю. Поддерживаются сложные сценарии (Aave, flash-loans) через `withdrawProcessing`. Сбор всех выведенных активов отражается в событии `Withdrawal`. Инварианты проверяют соответствие стоимости и supply после комиссий.【F:contracts/PoolLogic.sol†L461-L517】
+
+#### 4.2.1 Параметры и режимы
+- **`_recipient`** — адрес получателя активов. В `withdraw` и `withdrawSafe` равен `msg.sender`, в `withdrawTo`/`withdrawToSafe` задаётся явно. Безопасные версии требуют массив `ComplexAsset[]` для точного закрытия внешних позиций и контроля проскальзывания.【F:contracts/PoolLogic.sol†L364-L410】
+- **`_fundTokenAmount`** — количество долей, списываемых с пользователя. Перед выполнением проверяется право на вывод (`lastDeposit[msg.sender] < block.timestamp`), достаточность баланса и минимальный остаток supply (`supplyAfterBurn ≥ 100000` либо полный выход). Эти проверки предотвращают ранние выводы и защищают от манипуляций supply.【F:contracts/PoolLogic.sol†L417-L429】
+- **`_complexAssetsData`** — массив структур с адресом актива, пользовательскими `withdrawData` и `slippageTolerance`. Его длина должна совпадать с количеством поддерживаемых активов; для простых активов элементы могут быть пустыми структурами.【F:contracts/PoolLogic.sol†L387-L471】
+
+#### 4.2.2 Расчёт комиссий и пропорций
+1. Пул вызывает `_mintManagerFee()`, чтобы начислить накопленные performance/streaming fees и получить свежие значения `fundValue` и `feesMinted`. Это выравнивает high-water mark и защищает оставшихся инвесторов от размывания при выходе крупного участника.【F:contracts/PoolLogic.sol†L431-L433】【F:contracts/PoolLogic.sol†L793-L809】
+2. **Exit fee**: `exitFee = requestedAmount * exitFeeNumerator / denominator`. Комиссия удерживается из `_fundTokenAmount`, а `execution.supplyAfterBurn` увеличивается на ту же величину, чтобы итоговый supply учитывал выпуск комиссии менеджеру. Комиссионные токены переводятся менеджеру (`transfer`), а событие `ExitFeeMinted` фиксирует объём комиссии.【F:contracts/PoolLogic.sol†L434-L448】
+3. После учёта комиссии вычисляется доля портфеля: `portion = netFundTokenAmount * 1e18 / totalSupply()`. Именно она используется для пропорционального списания активов и расчёта USD-стоимости вывода `valueWithdrawn = portion * fundValue / 1e18`. При полном выходе (`totalSupply() == 0`) high-water mark сбрасывается к `1e18`, что предотвращает «залипание» прошлых максимумов.【F:contracts/PoolLogic.sol†L451-L459】【F:contracts/PoolLogic.sol†L497-L504】
+
+#### 4.2.3 Обработка активов и инварианты
+- Каждый поддерживаемый актив проходит через `_withdrawProcessing`, который может выполнить дополнительную логику (погашение долга, разбор позиций) и вернуть фактическую сумму к отправке и флаг внешней обработки. Для ERC20 активов без сложностей функция просто рассчитывает пропорциональный баланс и переводит его получателю.【F:contracts/PoolLogic.sol†L461-L488】
+- После завершения цикла массив `WithdrawnAsset[]` урезается до фактически выведенных позиций и включается в событие `Withdrawal` — это облегчает фронтенду отображение структуры выхода.【F:contracts/PoolLogic.sol†L481-L517】
+- Два инварианта защищают корректность состояния: разница между прежней и новой стоимостью пула не может превышать оценку выведенной доли (с допуском 1e15), а сумма `execution.supplyAfterBurn + execution.feesMinted` должна совпадать с текущим `totalSupply()`. Нарушение любого условия приводит к откату транзакции.【F:contracts/PoolLogic.sol†L499-L505】
+
+#### 4.2.4 События и дополнительные эффекты
+- Событие `Withdrawal` публикует стоимость вывода, количество сожжённых долей, остаток на балансе получателя и список активов, что облегчает построение отчётности и проверку комиссий. Если начислялась exit fee, событие `ExitFeeMinted` фиксирует её объём. При полном обнулении supply переменная `tokenPriceAtLastFeeMint` принудительно сбрасывается до 1e18.【F:contracts/PoolLogic.sol†L434-L517】【F:contracts/PoolLogic.sol†L455-L459】
 
 ### 4.3 Прямой вызов `mintManagerFee()`
 - Любой желающий (обычно автоматизация или фронт) может вызвать функцию напрямую, если пул не приостановлен. Это начисляет накопленные performance/streaming fees без необходимости депозита/вывода. Комиссии распределяются между менеджером и DAO по текущим ставкам, high-water mark обновляется, `lastFeeMintTime` фиксируется (если ставка management > 0).【F:contracts/PoolLogic.sol†L779-L820】
@@ -129,5 +153,38 @@
 - **Отображение невыплаченных комиссий**: `calculateAvailableManagerFee()` выдаёт общий объём токенов, который будет выпущен при ближайшем `mintManagerFee()`. Для детализации можно повторно вызвать и разобрать `_availableManagerFee` через off-chain симуляцию (контракт сам возвращает сумму без разбивки).【F:contracts/PoolLogic.sol†L728-L744】
 - **High-water mark**: храните и отображайте `tokenPriceAtLastFeeMint` как последнюю зафиксированную цену. Новая performance fee не начислится, пока `tokenPrice()` (после корректировки на комиссию) не превысит это значение. Это удобно для объяснения инвесторам, почему в конкретный момент performance fee равна нулю.【F:contracts/PoolLogic.sol†L806-L809】【F:contracts/PoolLogic.sol†L765-L770】
 - **События**: для построения отчётности по комиссиям достаточно отслеживать `ManagerFeeMinted`, `EntryFeeMinted`, `ExitFeeMinted`. Сумма комиссий в USD может быть восстановлена через исторические `tokenPrice()` и `fundValue` из `Deposit`/`Withdrawal` событий или через off-chain оценку активов.
+
+## 9. Справочник функций, переменных и формул
+
+### 9.1 Публичные функции PoolLogic
+- **`tokenPrice()`** — цена доли, учитывающая виртуальный выпуск manager fee. Использует `_availableManagerFee` и `_tokenPrice`, чтобы добавить к `totalSupply` ожидаемые токены комиссии перед делением стоимости на supply.【F:contracts/PoolLogic.sol†L704-L726】
+- **`tokenPriceWithoutManagerFee()`** — диагностическая цена без учёта невыплаченных комиссий; может отличаться от фактической стоимости доли и не предназначена для пользовательских интерфейсов.【F:contracts/PoolLogic.sol†L713-L717】
+- **`calculateAvailableManagerFee(uint256 fundValue)`** — возвращает потенциальный выпуск токенов комиссии в случае немедленного `mintManagerFee()`. Используется для отображения «не начисленных» комиссий во фронтенде.【F:contracts/PoolLogic.sol†L728-L744】
+- **`mintManagerFee()`** — начисляет performance и streaming fee, распределяет долю DAO/менеджера, обновляет `tokenPriceAtLastFeeMint` и `lastFeeMintTime`, возвращает `(fundValue, amountMinted)`. Доступна любому адресу при незаблокированном пуле.【F:contracts/PoolLogic.sol†L779-L820】
+- **`deposit` / `depositFor` / `depositForWithCustomCooldown`** — публичные фасады для `_depositFor` с различными наборами параметров (получатель, кастомный cooldown). Возвращают количество токенов, выпущенных инвестору.【F:contracts/PoolLogic.sol†L230-L333】
+- **`withdraw` / `withdrawTo`** — устаревшие фасады `_withdrawTo`, сохраняемые для обратной совместимости (без обработки сложных активов). Рекомендуется переходить на безопасные варианты.【F:contracts/PoolLogic.sol†L364-L385】
+- **`withdrawSafe` / `withdrawToSafe`** — современные фасады `_withdrawTo`, принимающие массив `ComplexAsset[]` для детальной конфигурации вывода и ограничения проскальзывания по каждому активу.【F:contracts/PoolLogic.sol†L387-L410】
+
+### 9.2 Ключевые внутренние функции
+- **`_availableManagerFee(...)`** — чистый расчёт `(performanceFee, streamingFee)` в токенах пула по текущим ставкам и состоянию. Применяется как внутри `_mintManagerFee()`, так и при расчёте `tokenPrice()`.【F:contracts/PoolLogic.sol†L748-L777】
+- **`_mintManagerFee()`** — агрегирует стоимость пула, ставки комиссий, вызывает `_availableManagerFee`, распределяет долю DAO (`daoFee`) и менеджера, обновляет high-water mark и таймштамп, эмитит `ManagerFeeMinted`. 【F:contracts/PoolLogic.sol†L787-L820】
+- **`_managerFees()`** — локальный геттер, возвращающий текущие числители/знаменатель комиссий из `PoolManagerLogic`. Используется во всех местах, где требуется актуальная ставка (депозиты, выводы, минт комиссий).【F:contracts/PoolLogic.sol†L891-L916】
+- **`_tokenPrice(fundValue, tokenSupply)`** — расчёт цены доли без учёта виртуальных комиссий. Применяется в проверках (`minDepositUSD`) и при обновлении `tokenPriceAtLastFeeMint`.【F:contracts/PoolLogic.sol†L720-L726】
+- **`_withdrawProcessing(...)`** — универсальная обработка вывода для каждого поддерживаемого актива: закрытие внешних позиций, расчёт пропорции, ограничение проскальзывания. Возвращает фактический баланс и флаг внешней обработки для события `Withdrawal`.【F:contracts/PoolLogic.sol†L465-L488】【F:contracts/PoolLogic.sol†L520-L581】
+
+### 9.3 Переменные и константы
+- **`performanceFeeNumerator`, `managerFeeNumerator`, `entryFeeNumerator`, `exitFeeNumerator`** — текущие ставки, управляемые `PoolManagerLogic`. Их значения ограничены максимумами фабрики (`_MANAGER_FEE_DENOMINATOR`). Изменяются через `setFeeNumerator`, `announceFeeIncrease`/`commitFeeIncrease`.【F:contracts/PoolManagerLogic.sol†L344-L514】【F:contracts/PoolFactory.sol†L333-L380】
+- **`maximumPerformanceFeeNumeratorChange`, `performanceFeeNumeratorChangeDelay`** — глобальные параметры фабрики, ограничивающие шаг и задержку повышения performance fee. Применяются при анонсе и коммите новых ставок. 【F:contracts/PoolFactory.sol†L120-L122】【F:contracts/PoolManagerLogic.sol†L432-L507】
+- **`tokenPriceAtLastFeeMint`** — high-water mark цены токена, обновляется только при успешном `_mintManagerFee()` и сбрасывается при полном выходе инвесторов (`totalSupply == 0`). Определяет, начисляется ли performance fee.【F:contracts/PoolLogic.sol†L147-L189】【F:contracts/PoolLogic.sol†L806-L809】【F:contracts/PoolLogic.sol†L455-L459】
+- **`lastFeeMintTime`** — последний момент начисления streaming fee. Используется в `_availableManagerFee` для расчёта временного интервала и обновляется только при ненулевой комиссии, чтобы избежать накопления ошибки. 【F:contracts/PoolLogic.sol†L155-L188】【F:contracts/PoolLogic.sol†L772-L814】
+- **`lastDeposit`, `lastExitCooldown`** — карты адресов к временным меткам и пользовательским cooldown. Обновляются в `_depositFor` и проверяются в `_withdrawTo`, обеспечивая соблюдение локапов. 【F:contracts/PoolLogic.sol†L325-L361】【F:contracts/PoolLogic.sol†L417-L433】
+- **`_daoFeeNumerator`, `_daoFeeDenominator`** — доля DAO в менеджерских комиссиях, задаваемая владельцем фабрики и применяемая при каждом `_mintManagerFee()`. Значение по умолчанию — 10 % (10/100).【F:contracts/PoolFactory.sol†L308-L329】【F:contracts/PoolLogic.sol†L802-L818】
+
+### 9.4 Основные формулы (USD × 1e18, токены × 1e18)
+- **Performance fee (USD)**: `feeUsdAmount = max(currentPrice - tokenPriceAtLastFeeMint, 0) * totalSupply / 1e18 * performanceFeeNumerator / denominator`. Конвертация в токены: `performanceFee = feeUsdAmount * totalSupply / (fundValue - feeUsdAmount)` — сохраняет неизменной цену доли после выпуска.【F:contracts/PoolLogic.sol†L763-L770】
+- **Streaming fee (токены)**: `streamingFee = totalSupply * (block.timestamp - lastFeeMintTime) * managerFeeNumerator / denominator / 365 days`. Если `lastFeeMintTime == 0`, комиссия не начисляется до первой фиксации времени.【F:contracts/PoolLogic.sol†L772-L776】
+- **Entry fee (токены)**: `entryFee = liquidityMintedBase * entryFeeNumerator / denominator`. Инвестор получает `liquidityMintedBase - entryFee`, комиссия выплачивается токенами пула менеджеру.【F:contracts/PoolLogic.sol†L303-L323】
+- **Exit fee (токены)**: `exitFee = requestedAmount * exitFeeNumerator / denominator`. Комиссия удерживается в токенах пула, supply корректируется обратно, чтобы сохранить цену доли.【F:contracts/PoolLogic.sol†L434-L448】
+- **Стоимость вывода**: `valueWithdrawn = portion * fundValue / 1e18`, где `portion = netFundTokenAmount * 1e18 / totalSupply()`. Формула используется в инвариантах и событии `Withdrawal`.【F:contracts/PoolLogic.sol†L451-L517】
 
 Эта спецификация охватывает все сценарии начисления комиссий в текущей версии `PoolLogic` и сопряжённых контрактах, описывая последовательность действий и формулы, необходимые для точного моделирования финансовых потоков.
