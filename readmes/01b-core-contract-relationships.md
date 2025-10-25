@@ -14,15 +14,15 @@
   - Governance.contractGuards
   - Governance.assetGuards
 * Хранит ссылки на
-  - address governanceAddress  двоеточие адрес Governance.
-  - address _assetHandler  двоеточие активный AssetHandler.
+  - address governanceAddress — адрес Governance.
+  - address _assetHandler — активный AssetHandler.
 * Наследует
-  - ProxyFactory  двоеточие разворачивает прокси пулов и менеджеров.
-  - IHasDaoInfo  двоеточие хранит параметры DAO и получателя комиссий.
-  - IHasFeeInfo  двоеточие задаёт глобальные лимиты комиссий и кулдаунов.
-  - IHasAssetInfo  двоеточие предоставляет проверку и лимит по активам.
-  - IHasGuardInfo  двоеточие проксирует адреса guard контрактов.
-  - IHasPausable  двоеточие управляет глобальными паузами пулов.
+  - ProxyFactory — разворачивает прокси пулов и менеджеров.
+  - IHasDaoInfo — хранит параметры DAO и получателя комиссий.
+  - IHasFeeInfo — задаёт глобальные лимиты комиссий и кулдаунов.
+  - IHasAssetInfo — предоставляет проверку и лимит по активам.
+  - IHasGuardInfo — проксирует адреса guard контрактов.
+  - IHasPausable — управляет глобальными паузами пулов.
 * Админские права
   - owner -> addCustomCooldownWhitelist removeCustomCooldownWhitelist addReceiverWhitelist removeReceiverWhitelist setDAOAddress setGovernanceAddress setDaoFee setMaximumFee setMaximumPerformanceFeeNumeratorChange setPerformanceFeeNumeratorChangeDelay setExitCooldown setMaximumSupportedAssetCount setAssetHandler setPoolsPaused pause unpause
 
@@ -31,10 +31,10 @@
 * Вызывает
   - нет
 * Хранит ссылки на
-  - mapping(address => address) contractGuards  двоеточие хранит guard адреса вроде PoolTokenSwapperGuard.
-  - mapping(uint16 => address) assetGuards  двоеточие хранит guard адреса активов.
+  - mapping(address => address) contractGuards — хранит guard адреса вроде PoolTokenSwapperGuard.
+  - mapping(uint16 => address) assetGuards — хранит guard адреса активов.
 * Наследует
-  - IGovernance  двоеточие задаёт интерфейс доступа к guard конфигурации.
+  - IGovernance — задаёт интерфейс доступа к guard конфигурации.
 * Админские права
   - owner -> setContractGuard setAssetGuard
 
@@ -62,14 +62,14 @@
   - Managed.managerName
   - Managed.trader
 * Хранит ссылки на
-  - address factory  двоеточие связанная PoolFactory.
-  - address poolManagerLogic  двоеточие активный PoolManagerLogic.
+  - address factory — связанная PoolFactory.
+  - address poolManagerLogic — активный PoolManagerLogic.
 * Наследует
-  - IFlashLoanReceiver  двоеточие реализует обработку Aave флешкредитов.
+  - IFlashLoanReceiver — реализует обработку Aave флешкредитов.
 * Админские права
   - manager -> setPoolPrivate execTransaction execTransactions
   - trader -> execTransaction execTransactions (если guard помечен как закрытый)
-  - factory owner -> setPoolManagerLogic
+  - poolFactoryOwner -> setPoolManagerLogic
 
 #### PoolManagerLogic
 
@@ -85,16 +85,16 @@
   - PoolLogic.mintManagerFee
   - PoolLogic.poolManagerLogic
 * Хранит ссылки на
-  - address factory  двоеточие источник глобальных ограничений (PoolFactory).
-  - address poolLogic  двоеточие управляемый PoolLogic.
+  - address factory — источник глобальных ограничений (PoolFactory).
+  - address poolLogic — управляемый PoolLogic.
 * Наследует
-  - Managed  двоеточие хранит менеджера, трейдера и список участников.
-  - IHasSupportedAsset  двоеточие раскрывает список поддерживаемых активов пула.
-  - IPoolManagerLogic  двоеточие стандартизирует интерфейс менеджера пула.
+  - Managed — хранит менеджера, трейдера и список участников.
+  - IHasSupportedAsset — раскрывает список поддерживаемых активов пула.
+  - IPoolManagerLogic — стандартизирует интерфейс менеджера пула.
 * Админские права
   - manager -> changeAssets setFeeNumerator announceFeeIncrease renounceFeeIncrease commitFeeIncrease setTraderAssetChangeDisabled setNftMembershipCollectionAddress setMinDepositUSD changeManager addMembers removeMembers addMember removeMember setTrader removeTrader
   - trader -> changeAssets (если traderAssetChangeDisabled == false)
-  - factory owner -> changeAssets setPoolLogic
+  - poolFactoryOwner -> changeAssets setPoolLogic
 
 #### Managed
 
@@ -103,7 +103,7 @@
 * Хранит ссылки на
   - нет
 * Наследует
-  - IManaged  двоеточие описывает роли менеджера, трейдера и участников.
+  - IManaged — описывает роли менеджера, трейдера и участников.
 * Админские права
   - manager -> changeManager addMembers removeMembers addMember removeMember setTrader removeTrader
 
@@ -119,13 +119,13 @@
   - PoolLogic.withdrawToSafe
   - PoolFactory.isPool
 * Хранит ссылки на
-  - address dHedgePoolFactory  двоеточие реестр пулов из PoolFactory.
+  - address dHedgePoolFactory — реестр пулов из PoolFactory.
 * Наследует
-  - VaultProxyFactory  двоеточие деплоит withdrawal- и limit-order-вольты.
-  - IEasySwapperV2  двоеточие задаёт интерфейс для двуступенчатых выводов.
+  - VaultProxyFactory — деплоит withdrawal- и limit-order-вольты.
+  - IEasySwapperV2 — задаёт интерфейс для двуступенчатых выводов.
 * Админские права
   - owner -> setCustomCooldownWhitelist setSwapper setCustomCooldown setdHedgePoolFactory setAuthorizedWithdrawers
-  - authorized withdrawer -> completeLimitOrderWithdrawalFor
+  - authorizedWithdrawer -> completeLimitOrderWithdrawalFor
 
 #### DhedgeEasySwapper
 
@@ -156,24 +156,24 @@
   - EasySwapperV2.getTrackedAssetsFromLimitOrders
   - EasySwapperV2.completeLimitOrderWithdrawalFor
 * Хранит ссылки на
-  - IPoolFactory poolFactory  двоеточие проверка пулов и цен.
-  - IEasySwapperV2 easySwapper  двоеточие маршрутизация выводов в EasySwapperV2.
-  - address limitOrderSettlementToken  двоеточие выбранный актив расчётов (валидируется через PoolFactory).
+  - IPoolFactory poolFactory — проверка пулов и цен.
+  - IEasySwapperV2 easySwapper — маршрутизация выводов в EasySwapperV2.
+  - address limitOrderSettlementToken — выбранный актив расчётов (валидируется через PoolFactory).
 * Наследует
   - нет
 * Админские права
   - owner -> addAuthorizedKeeper removeAuthorizedKeeper setDefaultSlippageTolerance setPoolFactory setEasySwapper setLimitOrderSettlementToken
-  - authorized keeper -> executeLimitOrders executeLimitOrdersSafe executeSettlementOrders executeSettlementOrdersSafe deleteLimitOrders
+  - authorizedKeeper -> executeLimitOrders executeLimitOrdersSafe executeSettlementOrders executeSettlementOrdersSafe deleteLimitOrders
 
 #### AssetHandler
 
 * Вызывает
   - нет
 * Хранит ссылки на
-  - mapping(address => uint16) assetTypes  двоеточие типы активов для пула.
-  - mapping(address => address) priceAggregators  двоеточие источники цены активов.
+  - mapping(address => uint16) assetTypes — типы активов для пула.
+  - mapping(address => address) priceAggregators — источники цены активов.
 * Наследует
-  - IAssetHandler  двоеточие предоставляет прайсинг и типизацию активов.
+  - IAssetHandler — предоставляет прайсинг и типизацию активов.
 * Админские права
   - owner -> setChainlinkTimeout addAsset addAssets removeAsset
 
@@ -193,10 +193,10 @@
 * Вызывает
   - нет
 * Хранит ссылки на
-  - address poolLogic  двоеточие логика PoolLogic для новых прокси.
-  - address poolManagerLogic  двоеточие логика PoolManagerLogic для новых прокси.
+  - address poolLogic — логика PoolLogic для новых прокси.
+  - address poolManagerLogic — логика PoolManagerLogic для новых прокси.
 * Наследует
-  - HasLogic  двоеточие хранит адреса реализаций логики.
+  - HasLogic — хранит адреса реализаций логики.
 * Админские права
   - owner -> setLogic
 
@@ -211,9 +211,9 @@
   - PoolFactory.isValidAsset
   - AssetHandler.priceAggregators
 * Хранит ссылки на
-  - address poolFactory  двоеточие фабрика пулов для проверки и цен.
+  - address poolFactory — фабрика пулов для проверки и цен.
 * Наследует
-  - TxDataUtils  двоеточие парсит calldata и методы.
+  - TxDataUtils — парсит calldata и методы.
 * Админские права
   - owner -> setAssets setPools setManager setSwapWhitelist salvage pause unpause
   - manager -> execTransaction
@@ -227,10 +227,10 @@
 * Хранит ссылки на
   - нет
 * Наследует
-  - TxDataUtils  двоеточие извлекает сигнатуры и параметры.
-  - IGuard  двоеточие предоставляет интерфейс guard проверок.
-  - ITransactionTypes  двоеточие маркирует типы транзакций пула.
-  - SlippageAccumulatorUser  двоеточие учитывает накопленный слippage пула.
+  - TxDataUtils — извлекает сигнатуры и параметры.
+  - IGuard — предоставляет интерфейс guard проверок.
+  - ITransactionTypes — маркирует типы транзакций пула.
+  - SlippageAccumulatorUser — учитывает накопленный слippage пула.
 * Админские права
   - не найдено в коде
 
