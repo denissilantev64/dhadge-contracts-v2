@@ -203,5 +203,5 @@
 ## Безопасность и контроль доступа
 poolManager управляет whitelist активов и комиссиями, но лимиты и задержки диктует фабрика (максимум активов, cap комиссий, timelock на повышение).【F:contracts/PoolManagerLogic.sol†L148-L480】
 trader может торговать и менять whitelist только когда traderAssetChangeDisabled == false, иначе изменения активов доступны лишь manager и poolFactoryOwner.【F:contracts/PoolManagerLogic.sol†L148-L521】
-poolFactoryOwner может переустановить PoolManagerLogic через PoolLogic и напрямую вызывать setPoolLogic, контролируя апгрейды пула.【F:contracts/PoolLogic.sol†L881-L887】【F:contracts/PoolManagerLogic.sol†L539-L553】
+poolFactoryOwner контролирует связь между PoolManagerLogic и PoolLogic. Он может через PoolManagerLogic.setPoolLogic() переназначить используемый PoolLogic и через PoolLogic.setPoolManagerLogic() (доступно factory или poolFactoryOwner) переназначить PoolManagerLogic. Это даёт poolFactoryOwner фактический контроль над апгрейдами пула.【F:contracts/PoolLogic.sol†L881-L887】【F:contracts/PoolManagerLogic.sol†L539-L553】
 Все сделки пула проходят через PoolLogic.execTransaction* и guard, который проверяет адреса активов и возвращает баланс, поэтому любое снятие средств возможно только в рамках guard-проверенной транзакции.【F:contracts/PoolLogic.sol†L604-L672】【F:contracts/PoolManagerLogic.sol†L192-L233】
