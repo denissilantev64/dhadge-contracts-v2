@@ -1,3 +1,7 @@
+# Архитектура ядра dHEDGE
+
+Этот документ описывает только ключевые контракты ядра (PoolFactory, PoolLogic, PoolManagerLogic, EasySwapperV2, PoolLimitOrderManager, PoolTokenSwapper и т.п.) и роли, которые реально управляют активами. Это сокращённая версия всей карты связей. Полная версия находится в `01b-contract-relationships.md`.
+
 # Блок 1. Граф взаимодействий
 
 #### PoolFactory
@@ -24,7 +28,7 @@
   - IHasGuardInfo — проксирует адреса guard контрактов.
   - IHasPausable — управляет глобальными паузами пулов.
 * Админские права
-  - owner -> addCustomCooldownWhitelist removeCustomCooldownWhitelist addReceiverWhitelist removeReceiverWhitelist setDAOAddress setGovernanceAddress setDaoFee setMaximumFee setMaximumPerformanceFeeNumeratorChange setPerformanceFeeNumeratorChangeDelay setExitCooldown setMaximumSupportedAssetCount setAssetHandler setPoolsPaused pause unpause
+  - poolFactoryOwner -> addCustomCooldownWhitelist removeCustomCooldownWhitelist addReceiverWhitelist removeReceiverWhitelist setDAOAddress setGovernanceAddress setDaoFee setMaximumFee setMaximumPerformanceFeeNumeratorChange setPerformanceFeeNumeratorChangeDelay setExitCooldown setMaximumSupportedAssetCount setAssetHandler setPoolsPaused pause unpause
 
 #### Governance
 
@@ -36,7 +40,7 @@
 * Наследует
   - IGovernance — задаёт интерфейс доступа к guard конфигурации.
 * Админские права
-  - owner -> setContractGuard setAssetGuard
+  - governanceOwner -> setContractGuard setAssetGuard
 
 #### PoolLogic
 
@@ -67,7 +71,7 @@
 * Наследует
   - IFlashLoanReceiver — реализует обработку Aave флешкредитов.
 * Админские права
-  - manager -> setPoolPrivate execTransaction execTransactions
+  - poolManager -> setPoolPrivate execTransaction execTransactions
   - trader -> execTransaction execTransactions (если guard помечен как закрытый)
   - poolFactoryOwner -> setPoolManagerLogic
 
@@ -92,7 +96,7 @@
   - IHasSupportedAsset — раскрывает список поддерживаемых активов пула.
   - IPoolManagerLogic — стандартизирует интерфейс менеджера пула.
 * Админские права
-  - manager -> changeAssets setFeeNumerator announceFeeIncrease renounceFeeIncrease commitFeeIncrease setTraderAssetChangeDisabled setNftMembershipCollectionAddress setMinDepositUSD changeManager addMembers removeMembers addMember removeMember setTrader removeTrader
+  - poolManager -> changeAssets setFeeNumerator announceFeeIncrease renounceFeeIncrease commitFeeIncrease setTraderAssetChangeDisabled setNftMembershipCollectionAddress setMinDepositUSD changeManager addMembers removeMembers addMember removeMember setTrader removeTrader
   - trader -> changeAssets (если traderAssetChangeDisabled == false)
   - poolFactoryOwner -> changeAssets setPoolLogic
 
@@ -105,7 +109,7 @@
 * Наследует
   - IManaged — описывает роли менеджера, трейдера и участников.
 * Админские права
-  - manager -> changeManager addMembers removeMembers addMember removeMember setTrader removeTrader
+  - poolManager -> changeManager addMembers removeMembers addMember removeMember setTrader removeTrader
 
 #### EasySwapperV2
 
@@ -124,7 +128,7 @@
   - VaultProxyFactory — деплоит withdrawal- и limit-order-вольты.
   - IEasySwapperV2 — задаёт интерфейс для двуступенчатых выводов.
 * Админские права
-  - owner -> setCustomCooldownWhitelist setSwapper setCustomCooldown setdHedgePoolFactory setAuthorizedWithdrawers
+  - easySwapperOwner -> setCustomCooldownWhitelist setSwapper setCustomCooldown setdHedgePoolFactory setAuthorizedWithdrawers
   - authorizedWithdrawer -> completeLimitOrderWithdrawalFor
 
 #### DhedgeEasySwapper
@@ -143,7 +147,7 @@
 * Наследует
   - нет
 * Админские права
-  - owner -> setWithdrawProps setSwapRouter setPoolAllowed setFee setFeeSink setManagerFeeBypass salvage
+  - dhedgeEasySwapperOwner -> setWithdrawProps setSwapRouter setPoolAllowed setFee setFeeSink setManagerFeeBypass salvage
 
 #### PoolLimitOrderManager
 
@@ -162,7 +166,7 @@
 * Наследует
   - нет
 * Админские права
-  - owner -> addAuthorizedKeeper removeAuthorizedKeeper setDefaultSlippageTolerance setPoolFactory setEasySwapper setLimitOrderSettlementToken
+  - limitOrderManagerOwner -> addAuthorizedKeeper removeAuthorizedKeeper setDefaultSlippageTolerance setPoolFactory setEasySwapper setLimitOrderSettlementToken
   - authorizedKeeper -> executeLimitOrders executeLimitOrdersSafe executeSettlementOrders executeSettlementOrdersSafe deleteLimitOrders
 
 #### AssetHandler
@@ -175,7 +179,7 @@
 * Наследует
   - IAssetHandler — предоставляет прайсинг и типизацию активов.
 * Админские права
-  - owner -> setChainlinkTimeout addAsset addAssets removeAsset
+  - assetHandlerOwner -> setChainlinkTimeout addAsset addAssets removeAsset
 
 #### Proxy
 
@@ -198,7 +202,7 @@
 * Наследует
   - HasLogic — хранит адреса реализаций логики.
 * Админские права
-  - owner -> setLogic
+  - poolFactoryOwner -> setLogic
 
 #### PoolTokenSwapper
 
@@ -215,8 +219,8 @@
 * Наследует
   - TxDataUtils — парсит calldata и методы.
 * Админские права
-  - owner -> setAssets setPools setManager setSwapWhitelist salvage pause unpause
-  - manager -> execTransaction
+  - poolTokenSwapperOwner -> setAssets setPools setManager setSwapWhitelist salvage pause unpause
+  - poolManager -> execTransaction
   - swapWhitelist -> swap
 
 #### PoolTokenSwapperGuard
@@ -236,23 +240,23 @@
 
 # Блок 2. Дерево управления и прав
 
-* Governance или owner
-  - Через PoolFactory owner задаёт комиссии, кулдауны и лимиты активов, а также может паузить конкретные пулы (setMaximumFee, setExitCooldown, setMaximumSupportedAssetCount, setPoolsPaused).
-  - Через PoolFactory owner переназначает DAO и Governance адреса, а также выбирает AssetHandler, влияя на список валидных активов.
-  - Owner Governance контракта назначает contractGuards и assetGuards, определяя какие протоколы доступны менеджерам.
-* PoolManager или manager или trader
-  - Менеджер PoolManagerLogic может добавлять и удалять активы, менять комиссии пула, объявлять и коммитить повышение комиссий и управлять whitelist участников.
-  - Менеджер PoolLogic выполняет сделки через execTransaction/execTransactions, которые проверяются guard-ами из PoolFactory.
-  - Trader адрес, если включён, может инициировать changeAssets и совершать guarded транзакции через PoolLogic, но ограничен whitelisted активами.
-  - Менеджер, назначенный в PoolTokenSwapper, может вызывать execTransaction для маршрутизатора обменов, соблюдая guard проверки.
-* Investor или LP
-  - Инвесторы вносят и выводят средства через PoolLogic (deposit, depositFor, depositForWithCustomCooldown, withdraw, withdrawSafe) и получают/сжигают долевые токены.
-  - Пользователи могут пользоваться обёртками EasySwapperV2 и DhedgeEasySwapper для депозитов/выводов, а также создавать лимитные ордера в PoolLimitOrderManager.
-  - Инвесторы не изменяют комиссии, whitelist активов и не управляют guard конфигурацией.
-* Keeper или automation
-  - Авторизованные keeper-ы PoolLimitOrderManager исполняют и отменяют лимитные и сеттлмент ордера, а также инициируют выводы через EasySwapperV2.
-  - Авторизованные withdrawer адреса в EasySwapperV2 завершают limit-order выводы от имени пользователей, не меняя настройки протокола.
+* poolFactoryOwner
+  - Меняет whitelist активов через PoolFactory, переназначение AssetHandler и установку contractGuard/assetGuard, а также разворачивает новые реализации PoolLogic и PoolManagerLogic.
+  - Ставит пулы на паузу, управляет глобальными кулдаунами и лимитами комиссий, переназначает daoAddress и governanceAddress.
+* governanceOwner
+  - Назначает contractGuard и assetGuard, определяя допустимые протоколы и активы для всех пулов.
+* assetHandlerOwner
+  - Обновляет whitelist активов и параметры прайс-фидов, влияя на доступные активы для всех пулов.
+* poolManager
+  - Исполняет сделки от имени пула через PoolManagerLogic и PoolLogic.execTransaction() под проверками guard-ов и whitelist-ов.
+  - Меняет состав активов, комиссии, whitelist участников и трейдера только в рамках глобальных ограничений фабрики.
+* trader
+  - Действует в рамках разрешений, выданных poolManager, может исполнять сделки и changeAssets, если traderAssetChangeDisabled не отключён, при этом ограничен whitelist активов и guard проверками.
+* investor
+  - Вносит и выводит собственные доли через deposit/withdraw, но не управляет whitelist активов, комиссиями, guard-ами и паузами.
+* authorizedKeeper и authorizedWithdrawer
+  - Исполняют лимитные ордера и завершают выводы в рамках заранее заданных параметров, не меняя настройки протокола и whitelist активов.
 
 # Блок 3. Текстовый обзор архитектуры
 
-PoolLogic хранит активы инвесторов и выпускает ERC20 токены пула при депозитах и сжигает их при выводах. PoolLogic допускает сделки только после проверки guard-ами и whitelist-ами из PoolManagerLogic и Governance, поэтому менеджер и трейдер ограничены разрешёнными активами. Комиссии начисляются через PoolLogic.mintManagerFee, которое вычисляет долю менеджера и DAO и минтит новые токены им. Ключевые рисковые параметры контролируют owner PoolFactory и Governance: они задают лимиты активов, комиссии, whitelist получателей и могут ставить пулы на паузу, в то время как менеджер может менять набор активов только в рамках этих глобальных ограничений.
+PoolLogic хранит активы инвесторов и минтит или сжигает долевые токены при депозитах и выводах. poolManager управляет активами пула через PoolManagerLogic и вызовы PoolLogic.execTransaction(), которые проходят проверки whitelist активов и guard конфигурации. poolFactoryOwner задаёт лимиты комиссий, whitelist активов и может ставить отдельные пулы или весь протокол на паузу. feeRecipient получает вознаграждение через mintManagerFee(), когда начисляются комиссии DAO и менеджеру. authorizedKeeper и authorizedWithdrawer исполняют заранее разрешённые лимитные ордера и выводы, не имея полномочий менять параметры протокола.
