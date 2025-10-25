@@ -1,150 +1,186 @@
 # PoolLogic
 
-Контракт PoolLogic хранит активы инвесторов пула и выпускает долевые токены ERC20, отражающие их долю.
-Он принимает депозиты и выводы, синхронизируя количество токенов с общей стоимостью активов пула.
-Менеджер инициирует сделки протокола через execTransaction/execTransactions, которые проходят проверки guard.
-Менеджерские и DAO комиссии начисляются минтингом долевых токенов через mintManagerFee.
+PoolLogic хранит активы пула, выпускает долевые токены ERC20 и взаимодействует с PoolManagerLogic для расчётов стоимости.
+Инвесторы вносят и выводят средства через deposit*/withdraw*, а долевые токены отражают их долю.
+poolManager и trader исполняют сделки через execTransaction/execTransactions с обязательной проверкой guard.
+Комиссионные доли выпускаются для feeRecipient и poolManager вызовом mintManagerFee().
 
 ## Состояние
-* `privatePool (bool)` — флаг приватного пула, определяет необходимость проверки членства инвестора при депозите и может блокировать вторичный рынок токенов через _beforeTokenTransfer. Меняется менеджером или в initialize.【F:contracts/PoolLogic.sol†L139-L220】
-* `creator (address)` — адрес, инициировавший деплой и получивший роль создателя. Используется как метаданные. Задается один раз в initialize.【F:contracts/PoolLogic.sol†L141-L189】
-* `creationTime (uint256)` — метка времени создания пула, нужна для фронтенда и отчетности. Устанавливается в initialize и далее не меняется.【F:contracts/PoolLogic.sol†L143-L189】
-* `factory (address)` — адрес PoolFactory, через него читаются паузы, guards, DAO информация и whitelist. Меняется только в initialize.【F:contracts/PoolLogic.sol†L145-L361】
-* `tokenPriceAtLastFeeMint (uint256)` — цена долевого токена на момент последнего начисления комиссии, используется при расчетах performance fee. Обновляется при депозитах/выводах и mintManagerFee.【F:contracts/PoolLogic.sol†L147-L821】
-* `lastDeposit (mapping(address => uint256))` — временная метка последнего депозита инвестора, нужна для расчета кулдауна и проверки немедленного вывода. Обновляется в _depositFor.【F:contracts/PoolLogic.sol†L149-L333】
-* `poolManagerLogic (address)` — текущий менеджерский логик-контракт, через него проверяются активы, комиссии и лимиты. Меняется фабрикой или ее владельцем через setPoolManagerLogic.【F:contracts/PoolLogic.sol†L151-L887】
-* `lastWhitelistTransfer (mapping(address => uint256))` — резерв под учет whitelist-переводов токенов. В текущей версии не изменяется и служит для будущих ограничений.【F:contracts/PoolLogic.sol†L153-L209】
-* `lastFeeMintTime (uint256)` — временная метка последнего стримингового начисления комиссии, влияет на расчет management fee. Обновляется в initialize и mintManagerFee.【F:contracts/PoolLogic.sol†L155-L815】
-* `lastExitCooldown (mapping(address => uint256))` — длительность текущего кулдауна на вывод для адреса, обновляется при каждом депозите. Читается при передаче токенов и вычислении оставшегося времени.【F:contracts/PoolLogic.sol†L157-L333】
-* Переменные ERC20Upgradeable — общее предложение `_totalSupply` и балансы `_balances`, отражающие количество долевых токенов инвесторов. Меняются только внутренними вызовами `_mint` и `_burn` в депозитах, выводах и начислении комиссий.【F:contracts/PoolLogic.sol†L320-L818】
+* `privatePool (bool)` — флаг приватного пула, включающий проверки членства и ограничения transfer через `_beforeTokenTransfer()`.
+  Кто может менять — poolManager через setPoolPrivate() и при создании пула в initialize().【F:contracts/PoolLogic.sol†L139-L220】
+* `creator (address)` — адрес, инициировавший развёртывание прокси пула. Используется как метаданные создания.
+  Кто может менять — задаётся один раз в initialize().【F:contracts/PoolLogic.sol†L141-L189】
+* `creationTime (uint256)` — метка времени создания пула, используется для отображения и аналитики.
+  Кто может менять — задаётся один раз в initialize().【F:contracts/PoolLogic.sol†L143-L189】
+* `factory (address)` — адрес PoolFactory для чтения пауз, лимитов комиссий, daoAddress и guard конфигурации.
+  Кто может менять — только в initialize() при создании пула.【F:contracts/PoolLogic.sol†L145-L361】
+* `tokenPriceAtLastFeeMint (uint256)` — цена долевого токена на момент последнего успешного mintManagerFee(). Обновляется в mintManagerFee() и сбрасывается до 1e18, если после вывода totalSupply становится нулевым.
+  Кто может менять — mintManagerFee() и _withdrawTo() при полном выводе.【F:contracts/PoolLogic.sol†L147-L821】【F:contracts/PoolLogic.sol†L472-L517】
+* `lastDeposit (mapping(address => uint256))` — время последнего депозита адреса для расчёта кулдауна на вывод.
+  Кто может менять — автоматически в _depositFor() для получателя токенов.【F:contracts/PoolLogic.sol†L149-L333】
+* `poolManagerLogic (address)` — активный контракт PoolManagerLogic, задающий whitelist активов, комиссии и доступ к ролям.
+  Кто может менять — только poolFactoryOwner через setPoolManagerLogic().【F:contracts/PoolLogic.sol†L151-L887】
+* `lastWhitelistTransfer (mapping(address => uint256))` — зарезервированное хранилище для будущих ограничений transfer. Сейчас не используется и не обновляется после объявления.
+  Кто может менять — нет активных обновлений в текущей версии.【F:contracts/PoolLogic.sol†L153-L209】
+* `lastFeeMintTime (uint256)` — время последнего успешного стримингового начисления management fee.
+  Кто может менять — initialize() и mintManagerFee().【F:contracts/PoolLogic.sol†L155-L821】
+* `lastExitCooldown (mapping(address => uint256))` — персональный кулдаун на вывод для адреса инвестора.
+  Кто может менять — автоматически в _depositFor() с учётом выбранного кулдауна.【F:contracts/PoolLogic.sol†L157-L333】
+* Переменные ERC20Upgradeable (`_totalSupply`, `_balances`, `_allowances`) — отражают долевые токены инвесторов и их разрешения.
+  Кто может менять — внутренние вызовы `_mint` и `_burn` из deposit*, withdraw*, mintManagerFee() и начисление комиссий при entry/exit.【F:contracts/PoolLogic.sol†L269-L517】【F:contracts/PoolLogic.sol†L787-L821】
 
 ## Публичные и external функции
 ### Функции депозита
 * `initialize(address _factory, bool _privatePool, string _fundName, string _fundSymbol)`
-  * Кто может вызывать: только однократно из Proxy (initializer).
-  * Что делает: задает фабрику, приватность, создателя, время создания и стартовые параметры комиссии.
-  * Побочные эффекты: устанавливает state переменные, включает ERC20 имя/символ.
-  * Важные require / проверки безопасности: модификатор `initializer` предотвращает повторный вызов.【F:contracts/PoolLogic.sol†L169-L189】
+  * Кто может вызывать — однократно из прокси при развёртывании пула.
+  * Что делает — задаёт фабрику, приватность, метаданные и стартовые параметры комиссий пула.
+  * Побочные эффекты — инициализирует ERC20 имя/символ, включает reentrancy guard, записывает creator, creationTime, lastFeeMintTime и базовую цену токена.
+  * Важные require / проверки безопасности — модификатор `initializer` запрещает повторный вызов.【F:contracts/PoolLogic.sol†L169-L189】
 * `deposit(address _asset, uint256 _amount)`
-  * Кто может вызывать: инвестор; если пул приватный — только член whitelist или сам менеджер.【F:contracts/PoolLogic.sol†L226-L268】
-  * Что делает: принимает разрешенный актив, рассчитывает стоимость и минтит новые долевые токены инвестору.
-  * Побочные эффекты: увеличивает totalSupply, переводит активы в пул, обновляет lastExitCooldown и lastDeposit, может начислить entry fee менеджеру, триггерит mintManagerFee.【F:contracts/PoolLogic.sol†L269-L361】
-  * Важные require / проверки безопасности: проверка на паузы фабрики и пула, whitelist получателя, разрешенный депозитный актив, запрет NFT, минимальный размер ликвидности, проверка минимального депозита в долларах.【F:contracts/PoolLogic.sol†L265-L345】
+  * Кто может вызывать — любой investor или poolManager; для приватного пула получатель должен быть в whitelist.
+  * Что делает — принимает разрешённый актив, рассчитывает его стоимость в USD эквиваленте и минтит долевые токены отправителю.
+  * Побочные эффекты — переводит активы в пул, вызывает _mintManagerFee(), обновляет lastDeposit и lastExitCooldown, может начислить entry fee poolManager.
+  * Важные require / проверки безопасности — проверка пауз фабрики и пула, whitelist приватного пула, проверка deposit asset, блокировка NFT и минимальный размер ликвидности/депозита.【F:contracts/PoolLogic.sol†L236-L361】
 * `depositFor(address _recipient, address _asset, uint256 _amount)`
-  * Кто может вызывать: любой адрес; если пул приватный — получатель должен быть в whitelist или менеджер.【F:contracts/PoolLogic.sol†L236-L268】
-  * Что делает: депонирует актив в пользу указанного получателя и минтит долевые токены на него.
-  * Побочные эффекты: те же, что у deposit, но для `_recipient`.
-  * Важные require / проверки безопасности: те же проверки активов, whitelists и минимального депозита, стандартный кулдаун.【F:contracts/PoolLogic.sol†L236-L361】
+  * Кто может вызывать — любой адрес; если пул приватный, `_recipient` должен быть poolManager или whitelisted investor.
+  * Что делает — депонирует актив и минтит долевые токены на `_recipient`.
+  * Побочные эффекты — те же, что у deposit, но с обновлением кулдауна и баланса для `_recipient`.
+  * Важные require / проверки безопасности — проверяет доступ `_recipient`, допустимый актив, паузы и минимальный депозит.【F:contracts/PoolLogic.sol†L236-L361】
 * `depositForWithCustomCooldown(address _recipient, address _asset, uint256 _amount, uint256 _cooldown)`
-  * Кто может вызывать: адрес из `customCooldownWhitelist` фабрики.【F:contracts/PoolLogic.sol†L248-L255】
-  * Что делает: депонирует актив за получателя и задает индивидуальный кулдаун на вывод.
-  * Побочные эффекты: минтит долевые токены, обновляет lastExitCooldown с учетом кастомного значения, может начислить entry fee, запускает mintManagerFee.【F:contracts/PoolLogic.sol†L257-L333】
-  * Важные require / проверки безопасности: проверка права отправителя, диапазона кулдауна, whitelists, разрешенного актива, NFT запрета, минимальной ликвидности и депозита.【F:contracts/PoolLogic.sol†L254-L345】
+  * Кто может вызывать — адрес из `customCooldownWhitelist` фабрики.
+  * Что делает — депонирует актив и задаёт пользовательский кулдаун для `_recipient`.
+  * Побочные эффекты — обновляет lastExitCooldown кастомным значением, вызывает _mintManagerFee(), может начислить entry fee.
+  * Важные require / проверки безопасности — проверяет whitelist отправителя, диапазон `_cooldown`, паузы, whitelist приватного пула и допустимый актив.【F:contracts/PoolLogic.sol†L248-L345】
 
 ### Функции вывода
 * `withdraw(uint256 _fundTokenAmount)`
-  * Кто может вызывать: инвестор, владеющий долевыми токенами и прошедший кулдаун.【F:contracts/PoolLogic.sol†L367-L517】
-  * Что делает: списывает указанное количество долевых токенов, пропорционально возвращает базовые активы и обрабатывает сложные позиции через guard без дополнительной защиты от проскальзывания.
-  * Побочные эффекты: уменьшает totalSupply, переводит активы получателю, может начислить exit fee менеджеру, обновляет цену токена при опустошении пула, эмитирует событие Withdrawal.【F:contracts/PoolLogic.sol†L367-L517】
-  * Важные require / проверки безопасности: проверка пауз, запрет мгновенного вывода после депозита, достаточный баланс долей, сохранение минимального остатка totalSupply, обязательная обработка guard, инвариант стоимости, проверка slippage для сложных активов, supply mismatch check.【F:contracts/PoolLogic.sol†L416-L505】
+  * Кто может вызывать — investor с достаточным балансом долевых токенов после окончания кулдауна.
+  * Что делает — списывает указанное количество долей и пропорционально возвращает активы пула без пользовательских параметров по сложным позициям.
+  * Побочные эффекты — уменьшает totalSupply, переводит активы вызывающему, может начислить exit fee, обновляет `tokenPriceAtLastFeeMint` при опустошении пула, эмитирует Withdrawal.
+  * Важные require / проверки безопасности — проверяет паузы, кулдаун, остаток totalSupply, доступные активы, guard обработку и инварианты стоимости.【F:contracts/PoolLogic.sol†L367-L517】
 * `withdrawTo(address _recipient, uint256 _fundTokenAmount)`
-  * Кто может вызывать: инвестор с достаточным балансом после кулдауна.【F:contracts/PoolLogic.sol†L379-L517】
-  * Что делает: аналог withdraw, но переводит активы на `_recipient`.
-  * Побочные эффекты: уменьшает totalSupply, переводит активы получателю, может начислить exit fee, генерирует Withdrawal.【F:contracts/PoolLogic.sol†L379-L517】
-  * Важные require / проверки безопасности: те же, что в withdraw, включая проверку кулдауна и инвариантов.【F:contracts/PoolLogic.sol†L416-L505】
+  * Кто может вызывать — investor, прошедший кулдаун и владеющий достаточными долями.
+  * Что делает — выполняет вывод без кастомных параметров, но переводит активы на указанный `_recipient`.
+  * Побочные эффекты — аналог withdraw с адресом получателя, может начислить exit fee, эмитирует Withdrawal.
+  * Важные require / проверки безопасности — такие же, как в withdraw, включая проверки пауз, кулдауна и инвариантов.【F:contracts/PoolLogic.sol†L379-L517】
 * `withdrawSafe(uint256 _fundTokenAmount, IPoolLogic.ComplexAsset[] memory _complexAssetsData)`
-  * Кто может вызывать: инвестор, прошедший кулдаун и имеющий достаточный баланс.【F:contracts/PoolLogic.sol†L393-L517】
-  * Что делает: осуществляет вывод с кастомными параметрами для каждого поддерживаемого актива, позволяя указать требования к сложным позициям и допустимую просадку.
-  * Побочные эффекты: уменьшает totalSupply, проводит транзакции guard для погашения позиций, переводит активы получателю, может начислить exit fee и обновить tokenPriceAtLastFeeMint.【F:contracts/PoolLogic.sol†L416-L517】
-  * Важные require / проверки безопасности: проверяет паузы, кулдаун, баланс долей, минимальный остаток totalSupply, корректность данных guard, лимит проскальзывания, инварианты стоимости и supply mismatch.【F:contracts/PoolLogic.sol†L416-L505】
+  * Кто может вызывать — investor после кулдауна с достаточными долями.
+  * Что делает — выводит долю пула с возможностью указать обработку сложных активов и допустимую просадку по каждому активу.
+  * Побочные эффекты — уменьшает totalSupply, обрабатывает внешние транзакции guard, переводит активы вызывающему, может начислить exit fee.
+  * Важные require / проверки безопасности — те же общие проверки, плюс соответствие `_complexAssetsData` supportedAssets и лимит проскальзывания.【F:contracts/PoolLogic.sol†L393-L517】
 * `withdrawToSafe(address _recipient, uint256 _fundTokenAmount, IPoolLogic.ComplexAsset[] memory _complexAssetsData)`
-  * Кто может вызывать: инвестор после кулдауна и с достаточными долями.【F:contracts/PoolLogic.sol†L404-L517】
-  * Что делает: выводит активы на заданный адрес с учетом расширенных параметров по каждому активу.
-  * Побочные эффекты: аналог withdrawSafe для другого получателя.
-  * Важные require / проверки безопасности: те же проверки пауз, кулдауна, балансов, guard и инвариантов.【F:contracts/PoolLogic.sol†L416-L505】
+  * Кто может вызывать — investor после кулдауна с достаточными долями.
+  * Что делает — выводит активы на `_recipient` с пользовательскими параметрами по сложным позициям и лимитами проскальзывания.
+  * Побочные эффекты — аналог withdrawSafe, но адрес получателя отделён от инициатора.
+  * Важные require / проверки безопасности — идентичны withdrawSafe: проверки пауз, кулдауна, соответствия `_complexAssetsData` и инвариантов пула.【F:contracts/PoolLogic.sol†L404-L517】
 
 ### Исполнение сделок
 * `execTransaction(address to, bytes calldata data)`
-  * Кто может вызывать: менеджер, трейдер либо любой адрес, если guard пометил транзакцию как публичную.【F:contracts/PoolLogic.sol†L640-L671】
-  * Что делает: направляет вызов к внешнему протоколу или активу от имени пула после согласования с guard.
-  * Побочные эффекты: может перемещать активы пула или менять его позиции, эмитирует TransactionExecuted и уведомляет фабрику.【F:contracts/PoolLogic.sol†L642-L655】
-  * Важные require / проверки безопасности: проверка глобальной и торговой паузы, запрет нулевого адреса, обязательный guard, проверка whitelist актива, guard txType > 0, проверка прав вызывающего, вызов afterTxGuard для трекинга.【F:contracts/PoolLogic.sol†L604-L653】
+  * Кто может вызывать — только poolManager или trader; публичные вызовы доступны, если guard отметил транзакцию как публичную.
+  * Что делает — выполняет одиночную транзакцию с внешним протоколом от имени пула через guard-проверку.
+  * Побочные эффекты — может перемещать активы, эмитирует TransactionExecuted, уведомляет фабрику.
+  * Важные require / проверки безопасности — проверка пауз, whitelist контракта или актива, валидация guard, запрет нулевого адреса, контроль роли и вызов afterTxGuard.【F:contracts/PoolLogic.sol†L604-L655】
 * `execTransactions(TxToExecute[] calldata txs)`
-  * Кто может вызывать: те же роли, что и для execTransaction на каждый отдельный вызов, поскольку _execTransaction проверяет доступ.【F:contracts/PoolLogic.sol†L669-L672】
-  * Что делает: выполняет несколько последовательных операций пула.
-  * Побочные эффекты: потенциально перемещает активы и генерирует события для каждой транзакции через внутренний вызов.
-  * Важные require / проверки безопасности: применяет те же проверки guard и пауз для каждого элемента через _execTransaction.【F:contracts/PoolLogic.sol†L604-L672】
+  * Кто может вызывать — только poolManager или trader; публичные вызовы возможны для транзакций, отмеченных guard.
+  * Что делает — выполняет серию транзакций через последовательные вызовы _execTransaction.
+  * Побочные эффекты — может перемещать активы пула и генерирует события TransactionExecuted для каждой операции.
+  * Важные require / проверки безопасности — для каждого элемента выполняются те же проверки пауз, guard и afterTxGuard, что и в execTransaction.【F:contracts/PoolLogic.sol†L604-L672】
 
 ### Управление пулом
 * `setPoolPrivate(bool _privatePool)`
-  * Кто может вызывать: только текущий менеджер пула.【F:contracts/PoolLogic.sol†L213-L219】
-  * Что делает: включает или выключает приватный режим.
-  * Побочные эффекты: обновляет `privatePool`, влияет на проверку членства и передачу токенов, эмитирует событие и уведомляет фабрику.【F:contracts/PoolLogic.sol†L216-L220】
-  * Важные require / проверки безопасности: проверка прав менеджера.【F:contracts/PoolLogic.sol†L213-L219】
+  * Кто может вызывать — только poolManager.
+  * Что делает — включает или отключает приватный режим пула.
+  * Побочные эффекты — обновляет `privatePool`, эмитирует PoolPrivacyUpdated и событие фабрики.
+  * Важные require / проверки безопасности — проверка роли poolManager.【F:contracts/PoolLogic.sol†L213-L220】
 * `setPoolManagerLogic(address _poolManagerLogic)`
-  * Кто может вызывать: фабрика или владелец фабрики.【F:contracts/PoolLogic.sol†L881-L887】
-  * Что делает: назначает новый логик-контракт менеджера, меняющий разрешенные активы, комиссии и guard настройки.
-  * Побочные эффекты: обновляет `poolManagerLogic`, эмитирует событие для мониторинга.【F:contracts/PoolLogic.sol†L885-L887】
-  * Важные require / проверки безопасности: запрещает нулевой адрес, ограничивает вызов владельцем экосистемы.【F:contracts/PoolLogic.sol†L881-L887】
+  * Кто может вызывать — factory или poolFactoryOwner.
+  * Что делает — переназначает PoolManagerLogic и тем самым меняет набор разрешённых активов и ролей.
+  * Побочные эффекты — обновляет `poolManagerLogic`, эмитирует PoolManagerLogicSet и событие фабрики.
+  * Важные require / проверки безопасности — запрещает нулевой адрес и ограничивает доступ фабрикой или её владельцем.【F:contracts/PoolLogic.sol†L881-L887】
 
-### Расчетные функции для фронтенда
+### Расчётные функции
+* `totalFundValue()`
+  * Кто может вызывать — любой адрес.
+  * Что делает — возвращает совокупную стоимость активов пула в quote валюте через вызов `IPoolManagerLogic(poolManagerLogic).totalFundValue()`.
+  * Побочные эффекты — нет.
+  * Важные require / проверки безопасности — нет (view).【F:contracts/PoolLogic.sol†L900-L904】【F:contracts/PoolManagerLogic.sol†L296-L343】
+* `assetValue(address _asset)` / `assetValue(address _asset, uint256 _amount)`
+  * Кто может вызывать — любой адрес.
+  * Что делает — оценивает стоимость актива пула или конкретного количества через PoolManagerLogic.
+  * Побочные эффекты — нет.
+  * Важные require / проверки безопасности — нет (view).【F:contracts/PoolLogic.sol†L904-L906】【F:contracts/PoolManagerLogic.sol†L280-L312】
+* `isPoolPrivate()`
+  * Кто может вызывать — любой адрес.
+  * Что делает — возвращает текущий режим приватности пула (публичный геттер переменной `privatePool`).
+  * Побочные эффекты — нет.
+  * Важные require / проверки безопасности — нет (view).【F:contracts/PoolLogic.sol†L139-L220】
 * `getFundSummary()`
-  * Кто может вызывать: любой адрес.【F:contracts/PoolLogic.sol†L675-L702】
-  * Что делает: возвращает агрегированные данные пула — имя, supply, стоимость, менеджера, комиссии и приватность.
-  * Побочные эффекты: нет.
-  * Важные require / проверки безопасности: нет, чистое чтение данных через poolManagerLogic.【F:contracts/PoolLogic.sol†L675-L701】
+  * Кто может вызывать — любой адрес.
+  * Что делает — возвращает агрегированные данные пула: имя, totalSupply, цену долевого токена, адрес poolManager, текущие комиссии, приватность и время создания.
+  * Побочные эффекты — нет.
+  * Важные require / проверки безопасности — нет, чтение из состояния и PoolManagerLogic.【F:contracts/PoolLogic.sol†L675-L701】
 * `tokenPrice()`
-  * Кто может вызывать: любой адрес.【F:contracts/PoolLogic.sol†L706-L711】
-  * Что делает: рассчитывает цену долевого токена с учетом невыпущенной комиссии менеджера.
-  * Побочные эффекты: нет.
-  * Важные require / проверки безопасности: нет, чистые вычисления на основе total value и потенциальной комиссии.【F:contracts/PoolLogic.sol†L706-L711】
+  * Кто может вызывать — любой адрес.
+  * Что делает — рассчитывает цену долевого токена с учётом невыпущенных комиссий.
+  * Побочные эффекты — нет.
+  * Важные require / проверки безопасности — нет (view).【F:contracts/PoolLogic.sol†L706-L711】
 * `tokenPriceWithoutManagerFee()`
-  * Кто может вызывать: любой адрес.【F:contracts/PoolLogic.sol†L715-L717】
-  * Что делает: возвращает цену токена без учета невыпущенных комиссий.
-  * Побочные эффекты: нет.
-  * Важные require / проверки безопасности: нет.【F:contracts/PoolLogic.sol†L715-L717】
+  * Кто может вызывать — любой адрес.
+  * Что делает — возвращает цену долевого токена без учёта невыпущенных комиссий poolManager.
+  * Побочные эффекты — нет.
+  * Важные require / проверки безопасности — нет (view).【F:contracts/PoolLogic.sol†L715-L717】
 * `calculateAvailableManagerFee(uint256 _fundValue)`
-  * Кто может вызывать: любой адрес, включая фронтенд.【F:contracts/PoolLogic.sol†L732-L743】
-  * Что делает: вычисляет сумму performance и management fee, доступную к выпуску при текущей стоимости.
-  * Побочные эффекты: нет.
-  * Важные require / проверки безопасности: нет, опирается на данные из poolManagerLogic и состояния fee.【F:contracts/PoolLogic.sol†L732-L743】
+  * Кто может вызывать — любой адрес.
+  * Что делает — рассчитывает сумму performance и management fee, доступную к выпуску при заданной стоимости пула.
+  * Побочные эффекты — нет.
+  * Важные require / проверки безопасности — нет, чистое чтение параметров комиссий.【F:contracts/PoolLogic.sol†L732-L743】
 * `getExitRemainingCooldown(address _depositor)`
-  * Кто может вызывать: любой адрес, включая инвестора для проверки кулдауна.【F:contracts/PoolLogic.sol†L871-L877】
-  * Что делает: возвращает оставшееся время до возможности вывода.
-  * Побочные эффекты: нет.
-  * Важные require / проверки безопасности: нет, простое чтение lastDeposit и lastExitCooldown.【F:contracts/PoolLogic.sol†L871-L877】
+  * Кто может вызывать — любой адрес.
+  * Что делает — возвращает оставшееся время кулдауна для инвестора.
+  * Побочные эффекты — нет.
+  * Важные require / проверки безопасности — нет (view).【F:contracts/PoolLogic.sol†L871-L877】
+
+ERC20 функции (`totalSupply()`, `balanceOf(address)`, `transfer`, `transferFrom`) — стандартные функции долевого токена пула. Они отражают долю investor в пуле и могут блокироваться для приватных пулов через `_beforeTokenTransfer()` при активном кулдауне или паузах.【F:contracts/PoolLogic.sol†L189-L220】
 
 ### Функции комиссий
 * `mintManagerFee()`
-  * Кто может вызывать: любой адрес (обычно менеджер или автоматизация).【F:contracts/PoolLogic.sol†L779-L782】
-  * Что делает: минтит долевые токены для DAO и менеджера на основании накопленных performance и management fee.
-  * Побочные эффекты: увеличивает totalSupply, обновляет `tokenPriceAtLastFeeMint` и `lastFeeMintTime`, переводит часть долей DAO и менеджеру, эмитирует ManagerFeeMinted.【F:contracts/PoolLogic.sol†L787-L821】
-  * Важные require / проверки безопасности: проверяет паузы фабрики/пула, использует guards для расчета стоимости, применяет DAO комиссию из фабрики.【F:contracts/PoolLogic.sol†L779-L821】
+  * Кто может вызывать — любой адрес (часто poolManager или автоматизация).
+  * Что делает — рассчитывает накопленные performance и management fee, минтит долевые токены для feeRecipient (daoAddress) и poolManager.
+  * Побочные эффекты — увеличивает totalSupply, обновляет `tokenPriceAtLastFeeMint` и `lastFeeMintTime`, переводит комиссионные доли, эмитирует ManagerFeeMinted и событие фабрики.
+  * Важные require / проверки безопасности — проверка пауз, чтение лимитов комиссий с фабрики, использование `_totalValue()` и `getDaoFee()` для расчёта долей.【F:contracts/PoolLogic.sol†L779-L821】
 
 ### Вспомогательные функции
 * `executeOperation(address[] calldata assets, uint256[] calldata amounts, uint256[] calldata premiums, address initiator, bytes calldata params)`
-  * Кто может вызывать: только Aave Lending Pool, которому соответствует guard, после инициированного flashloan из пула.【F:contracts/PoolLogic.sol†L928-L956】
-  * Что делает: выполняет цепочку транзакций, предоставленную guard, для обработки flashloan и проверяет возврат средств с учетом премии.
-  * Побочные эффекты: может переводить активы в ходе flashloan, но требует, чтобы баланс после операций покрывал долг, эмитирования нет.
-  * Важные require / проверки безопасности: проверяет инициатора, валидность guard и адреса лендинга, а также что после операций баланс ≥ долг + премия (защита от потерь).【F:contracts/PoolLogic.sol†L934-L956】
+  * Кто может вызывать — только Aave lending pool, разрешённый соответствующим asset guard.
+  * Что делает — исполняет последовательность транзакций guard в рамках flashloan и проверяет возврат долга с премией.
+  * Побочные эффекты — выполняет внешние вызовы и требует, чтобы баланс покрывал сумму долга плюс премию.
+  * Важные require / проверки безопасности — проверяет инициатора, адрес лендинга через guard и достаточный остаток активов после операций.【F:contracts/PoolLogic.sol†L928-L956】
 * `onERC721Received(address operator, address from, uint256 tokenId, bytes calldata data)`
-  * Кто может вызывать: ERC721 контракты, защищенные соответствующим guardом фабрики.【F:contracts/PoolLogic.sol†L971-L984】
-  * Что делает: разрешает прием NFT в пул, если guard подтверждает корректность передачи.
-  * Побочные эффекты: нет, возвращает селектор совместимости.
-  * Важные require / проверки безопасности: проверяет, что оператор проходит через guard и верификацию IERC721VerifyingGuard.【F:contracts/PoolLogic.sol†L977-L983】
+  * Кто может вызывать — ERC721 контракты, прошедшие проверку через соответствующий guard.
+  * Что делает — подтверждает приём NFT пулом после валидации оператора guard-ом.
+  * Побочные эффекты — нет, возвращает селектор совместимости.
+  * Важные require / проверки безопасности — проверяет guard оператора и валидацию `verifyERC721` перед приёмом токена.【F:contracts/PoolLogic.sol†L971-L984】
 
 ## Events
-* `Deposit(address fundAddress, address investor, address assetDeposited, uint256 amountDeposited, uint256 valueDeposited, uint256 fundTokensReceived, uint256 totalInvestorFundTokens, uint256 fundValue, uint256 totalSupply, uint256 time)` — фронтенд отслеживает каждый депозит, количество долевых токенов и новую стоимость пула.【F:contracts/PoolLogic.sol†L95-L358】
-* `Withdrawal(address fundAddress, address investor, uint256 valueWithdrawn, uint256 fundTokensWithdrawn, uint256 totalInvestorFundTokens, uint256 fundValue, uint256 totalSupply, WithdrawnAsset[] withdrawnAssets, uint256 time)` — сигнализирует об успешном выводе, объеме возвращенных активов и обновленном балансе инвестора для офчейн учета.【F:contracts/PoolLogic.sol†L108-L516】
-* `TransactionExecuted(address pool, address manager, uint16 transactionType, uint256 time)` — позволяет бэкенду логировать каждую торговую операцию и тип транзакции после проверки guard.【F:contracts/PoolLogic.sol†L120-L654】
-* `PoolPrivacyUpdated(bool isPoolPrivate)` — информирует интерфейсы о смене режима приватности пула.【F:contracts/PoolLogic.sol†L122-L219】
-* `ManagerFeeMinted(address pool, address manager, uint256 available, uint256 daoFee, uint256 managerFee, uint256 tokenPriceAtLastFeeMint)` — фиксирует выпуск комиссионных долей для DAO и менеджера и облегчает учет вознаграждений.【F:contracts/PoolLogic.sol†L124-L821】
-* `PoolManagerLogicSet(address poolManagerLogic, address from)` — уведомляет об обновлении логики менеджера, чтобы фронтенд обновил список активов и правил.【F:contracts/PoolLogic.sol†L133-L887】
-* `EntryFeeMinted(address manager, uint256 entryFeeAmount)` — позволяет отследить, какую комиссию менеджер получил при депозите.【F:contracts/PoolLogic.sol†L135-L314】
-* `ExitFeeMinted(address manager, uint256 exitFeeAmount)` — фиксирует удержанную комиссию при выводе для отчетности и аналитики.【F:contracts/PoolLogic.sol†L137-L448】
+* `Deposit(address fundAddress, address investor, address assetDeposited, uint256 amountDeposited, uint256 valueDeposited, uint256 fundTokensReceived, uint256 totalInvestorFundTokens, uint256 fundValue, uint256 totalSupply, uint256 time)` — фиксирует параметры депозита для индексации.
+  Эмитится в: deposit(), depositFor(), depositForWithCustomCooldown().【F:contracts/PoolLogic.sol†L320-L358】
+* `Withdrawal(address fundAddress, address investor, uint256 valueWithdrawn, uint256 fundTokensWithdrawn, uint256 totalInvestorFundTokens, uint256 fundValue, uint256 totalSupply, WithdrawnAsset[] withdrawnAssets, uint256 time)` — сигнализирует о завершённом выводе и возвращённых активах.
+  Эмитится в: withdraw(), withdrawTo(), withdrawSafe(), withdrawToSafe().【F:contracts/PoolLogic.sol†L367-L517】
+* `TransactionExecuted(address pool, address manager, uint16 transactionType, uint256 time)` — позволяет отслеживать каждую торговую операцию пула.
+  Эмитится в: execTransaction(), execTransactions() (через _execTransaction).【F:contracts/PoolLogic.sol†L604-L672】
+* `PoolPrivacyUpdated(bool isPoolPrivate)` — отражает смену режима приватности пула.
+  Эмитится в: setPoolPrivate().【F:contracts/PoolLogic.sol†L213-L220】
+* `ManagerFeeMinted(address pool, address manager, uint256 available, uint256 daoFee, uint256 managerFee, uint256 tokenPriceAtLastFeeMint)` — фиксирует выпуск комиссионных долей для feeRecipient и poolManager.
+  Эмитится в: mintManagerFee() / _mintManagerFee().【F:contracts/PoolLogic.sol†L787-L821】
+* `PoolManagerLogicSet(address poolManagerLogic, address from)` — сигнализирует о смене логики менеджера.
+  Эмитится в: setPoolManagerLogic().【F:contracts/PoolLogic.sol†L881-L887】
+* `EntryFeeMinted(address manager, uint256 entryFeeAmount)` — отражает начисление entry fee poolManager при депозите.
+  Эмитится в: deposit(), depositFor(), depositForWithCustomCooldown().【F:contracts/PoolLogic.sol†L303-L314】
+* `ExitFeeMinted(address manager, uint256 exitFeeAmount)` — фиксирует удержанную exit fee при выводе.
+  Эмитится в: withdraw(), withdrawTo(), withdrawSafe(), withdrawToSafe().【F:contracts/PoolLogic.sol†L434-L448】
 
 ## Безопасность и контроль доступа
-PoolManager и трейдер могут перемещать активы пула только через execTransaction/execTransactions, и каждая операция должна быть одобрена соответствующим guard, который задает тип транзакции и опционально отслеживает ее.【F:contracts/PoolLogic.sol†L604-L655】
-Владелец фабрики может приостановить контракты или конкретный пул, а также торговлю, что блокирует депозиты, выводы и исполнение сделок за счет модификаторов whenNotFactoryPaused/whenNotPaused и проверки tradingPausedPools.【F:contracts/PoolLogic.sol†L159-L166】【F:contracts/PoolLogic.sol†L604-L605】
-Комиссии начисляются через mintManagerFee — контракт рассчитывает доступные суммы, минтит долевые токены и распределяет их между DAO и менеджером, размывая доли инвесторов по прозрачной формуле.【F:contracts/PoolLogic.sol†L787-L821】
-Инвесторов защищают кулдаун на вывод, whitelist приватного пула, проверки разрешенных активов через poolManagerLogic, лимиты минимального депозита, а также guard-проверки и ограничения проскальзывания при выводе сложных активов.【F:contracts/PoolLogic.sol†L265-L345】【F:contracts/PoolLogic.sol†L416-L505】【F:contracts/PoolLogic.sol†L604-L636】
+poolManager и trader могут перемещать активы пула только через execTransaction()/execTransactions(), и каждая транзакция проходит guard-проверку с валидацией адреса и пост-проверкой afterTxGuard.【F:contracts/PoolLogic.sol†L604-L672】
+poolFactoryOwner может приостановить фабрику или отдельные пулы, что блокирует депозиты, выводы и торговлю через модификаторы whenNotFactoryPaused, whenNotPaused и проверку tradingPausedPools.【F:contracts/PoolLogic.sol†L159-L166】【F:contracts/PoolLogic.sol†L604-L605】
+mintManagerFee() минтит новые долевые токены и распределяет их между feeRecipient (daoAddress фабрики) и poolManager, уменьшая долю остальных инвесторов.【F:contracts/PoolLogic.sol†L787-L821】
+investor защищён кулдауном на вывод, whitelist приватного пула, ограничениями разрешённых активов из PoolManagerLogic и guard-проверками, включая контроль проскальзывания для сложных активов.【F:contracts/PoolLogic.sol†L236-L361】【F:contracts/PoolLogic.sol†L416-L505】【F:contracts/PoolLogic.sol†L604-L636】
