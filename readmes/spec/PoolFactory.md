@@ -28,7 +28,7 @@ PoolFactory разворачивает новые пулы как пару пр�
   Кто может менять — только poolFactoryOwner через addCustomCooldownWhitelist()/removeCustomCooldownWhitelist().【F:contracts/PoolFactory.sol†L246-L258】
 * receiverWhitelist (mapping(address => bool)) — адреса, принимающие fund tokens под активным кулдауном transfer из пула.【F:contracts/PoolFactory.sol†L134-L272】
   Кто может менять — только poolFactoryOwner через addReceiverWhitelist()/removeReceiverWhitelist().【F:contracts/PoolFactory.sol†L260-L272】
-* paused() (bool) — глобальная пауза фабрики через PausableUpgradeable, блокирует createFund и setLogic при активации.【F:contracts/PoolFactory.sol†L204-L507】
+* _paused (bool) — глобальный флаг паузы фабрики. Если true блокируется createFund и другие функции с whenNotPaused.【F:contracts/PoolFactory.sol†L204-L507】
   Кто может менять — только poolFactoryOwner через pause()/unpause().【F:contracts/PoolFactory.sol†L494-L503】
 * pausedPools (mapping(address => bool)) — флаги блокировки депозитов, выводов и fee mint для конкретных пулов.【F:contracts/PoolFactory.sol†L139-L523】
   Кто может менять — только poolFactoryOwner через setPoolsPaused().【F:contracts/PoolFactory.sol†L510-L523】
