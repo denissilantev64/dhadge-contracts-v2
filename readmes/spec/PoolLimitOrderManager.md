@@ -1,118 +1,143 @@
 # PoolLimitOrderManager
 
-Контракт управляет лимитными ордерами пула и очередью их исполнения. Хранит заявки инвесторов на продажу долевых токенов по целевым ценам, выполняет их через EasySwapperV2 и конвертирует активы в расчётный токен. Ограничивает доступ к исполнению через authorizedKeeper и обслуживает интересы investor и poolManager, но limitOrderManagerOwner настраивает все параметры и риски.
+Контракт управляет лимитными и settlement ордерами для инвесторов dHEDGE, взаимодействует с EasySwapperV2 и контролирует исполнение через авторизованных keeper.
 
 ## Состояние
-* `poolFactory (address)` — источник проверки валидности пулов и активов, используется для получения цен и guard адресов.  Кто может менять — limitOrderManagerOwner через setPoolFactory() и initialize().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L107-L528】
-* `easySwapper (address)` — ссылка на EasySwapperV2, через который выводятся активы при исполнении ордеров и settlement.  Кто может менять — limitOrderManagerOwner через setEasySwapper() и initialize().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L109-L535】
-* `defaultSlippageTolerance (uint16)` — глобальный лимит проскальзывания для свопов при исполнении ордеров.  Кто может менять — limitOrderManagerOwner через setDefaultSlippageTolerance() и initialize().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L111-L524】
-* `limitOrderSettlementToken (address)` — токен, в который сводятся активы после исполнения ордеров.  Кто может менять — limitOrderManagerOwner через setLimitOrderSettlementToken() и initialize().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L115-L542】
-* `limitOrders (mapping(bytes32 => LimitOrderInfo))` — хранилище параметров ордеров (amount, цены, пользователь, пул, pricingAsset).  Кто может менять — создаётся и обновляется в createLimitOrder(), modifyLimitOrder(), _removeLimitOrder().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L118-L392】
-* `isAuthorizedKeeper (mapping(address => bool))` — whitelist authorizedKeeper, которые могут исполнять и отменять ордера.  Кто может менять — limitOrderManagerOwner через addAuthorizedKeeper() и removeAuthorizedKeeper().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L122-L518】
-* `limitOrderIds (EnumerableSet)` — набор идентификаторов ордеров для итерации и проверки существования.  Кто может менять — внутренние функции createLimitOrder(), modifyLimitOrder(), _removeLimitOrder().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L124-L392】
-* `usersToSettle (EnumerableSet)` — список инвесторов, у которых есть незавершённый settlement ордер.  Кто может менять — _processLimitOrderExecution() и _removeSettlementOrder().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L126-L399】
-* `структура разрешённых токенов/DEX` — не найдено в коде сверх проверок через poolFactory.isValidAsset().
-* `salvage storage` — не найдено в коде.
+- `poolFactory (address)` — фабрика пулов, используется для проверки валидности пулов и активов. Настраивает limitOrderManagerOwner через `initialize()` и `setPoolFactory()`.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L149-L161】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L526-L529】
+- `easySwapper (address)` — адрес EasySwapperV2 для вывода активов. Задаёт limitOrderManagerOwner через `initialize()` и `setEasySwapper()`.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L149-L161】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L532-L535】
+- `defaultSlippageTolerance (uint16)` — глобальный лимит допустимого отклонения цены (доля от 10_000). Настраивается при `initialize()` и в `setDefaultSlippageTolerance()`.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L149-L161】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L520-L523】
+- `limitOrderSettlementToken (address)` — токен, в который сводятся settlement ордера. Меняется limitOrderManagerOwner через `initialize()` и `setLimitOrderSettlementToken()`.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L149-L161】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L538-L541】
+- `limitOrders (mapping(bytes32 => LimitOrderInfo))` — хранит активные ордера инвесторов по ключу user+pool. Обновляется при создании, изменении, частичном исполнении и удалении ордера.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L120-L311】
+- `isAuthorizedKeeper (mapping(address => bool))` — whitelist keeper адресов. Меняет limitOrderManagerOwner через `addAuthorizedKeeper()` и `removeAuthorizedKeeper()`.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L122-L518】
+- `limitOrderIds (EnumerableSet.Bytes32Set)` — множество идентификаторов ордеров для выборки и проверок. Заполняется в `createLimitOrder()` и очищается при удалении или полном исполнении.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L125-L311】
+- `usersToSettle (EnumerableSet.AddressSet)` — очередь пользователей, ожидающих settlement. Обновляется в `_processLimitOrderExecution()` и `_removeSettlementOrder()`.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L128-L399】
 
 ## Публичные и external функции
-### Управление ордерами инвестора
+### Инициализация
+`initialize(address admin_, IPoolFactory poolFactory_, IEasySwapperV2 easySwapper_, uint16 defaultSlippageTolerance_, address limitOrderSettlementToken_)`
+- Кто может вызывать — однократно limitOrderManagerOwner при развёртывании прокси.
+- Что делает — задаёт фабрику, EasySwapperV2, допуск по проскальзыванию и settlement токен.
+- Побочные эффекты — устанавливает владельца, записывает параметры состояния.
+- Важные проверки — запрещает нулевые адреса, убеждается что settlement токен валиден в `poolFactory`.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L149-L161】
+
+### Работа инвестора с ордерами
 `createLimitOrder(LimitOrderInfo calldata limitOrderInfo_)`
-* Кто может вызывать — investor, создающий ордер для собственного адреса.
-* Что делает — проверяет пул, баланс долевых токенов, цены стоп-лосс и тейк-профит, затем записывает ордер и ID в набор.
-* Побочные эффекты — резервирует запись в limitOrders, эмитирует LimitOrderCreated.
-* Важные require / проверки безопасности — проверяет, что user совпадает с msg.sender, пул существует, актив валиден и цены корректны.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L170-L197】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L443-L466】
+- Кто может вызывать — investor.
+- Что делает — создаёт лимитный ордер на вывод долевых токенов пула по условиям stop-loss/take-profit.
+- Побочные эффекты — сохраняет данные в `limitOrders`, добавляет id в `limitOrderIds`, эмитирует `LimitOrderCreated`.
+- Важные проверки — проверяет, что пользователь создаёт ордер для себя, пул валиден, баланс достаточен, цена актива и агрегатор допустимы.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L170-L183】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L443-L466】
 
 `modifyLimitOrder(LimitOrderInfo calldata modificationInfo_)`
-* Кто может вызывать — investor, который уже создал ордер на выбранный пул.
-* Что делает — повторно валидирует параметры и заменяет значения в limitOrders.
-* Побочные эффекты — обновляет запись ордера, эмитирует LimitOrderModified.
-* Важные require / проверки безопасности — требует существование ордера и прохождение тех же проверок, что и при создании.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L185-L199】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L443-L466】
+- Кто может вызывать — investor, владеющий ордером.
+- Что делает — обновляет параметры существующего ордера (amount, цены, pricingAsset).
+- Побочные эффекты — перезаписывает `limitOrders[orderId]`, эмитирует `LimitOrderModified`.
+- Важные проверки — переиспользует `_validateLimitOrderInfo`, убеждается что ордер существует.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L190-L200】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L443-L466】
 
 `deleteLimitOrder(address pool_)`
-* Кто может вызывать — investor, желающий отменить свой ордер на конкретный пул.
-* Что делает — удаляет ордер и ID из набора, испускает событие.
-* Побочные эффекты — очищает mapping и set, эмитирует LimitOrderDeleted.
-* Важные require / проверки безопасности — использует _removeLimitOrder(), который проверяет наличие ордера и принадлежность инвестору через orderId.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L202-L206】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L383-L392】
+- Кто может вызывать — investor.
+- Что делает — удаляет собственный ордер для указанного пула.
+- Побочные эффекты — вызывает `_removeLimitOrder`, очищает `limitOrders` и `limitOrderIds`, эмитирует `LimitOrderDeleted`.
+- Важные проверки — проверяет наличие ордера; при вызове `_removeLimitOrder` убеждается, что id существует.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L202-L205】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L383-L391】
 
-### Исполнение и обслуживание ордеров
+### Исполнение ордеров keeper
 `executeLimitOrders(LimitOrderExecution[] calldata orders_)`
-* Кто может вызывать — только authorizedKeeper.
-* Что делает — последовательно вызывает _executeLimitOrder для набора ордеров и переводит долевые токены из пулов.
-* Побочные эффекты — переводит долевые токены на контракт, одобряет их для easySwapper, инициирует лимитные WithdrawalVault, добавляет инвесторов в очередь settlement, эмитирует события исполнения.
-* Важные require / проверки безопасности — проверяет наличие ордера, валидирует цены и slippage, требует allowance долевых токенов инвестора, запрещает вызов сторонними адресами через модификатор и внутренний self-call guard.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L212-L339】
+- Кто может вызывать — authorizedKeeper.
+- Что делает — последовательно исполняет набор лимитных ордеров с учётом частичных исполнений.
+- Побочные эффекты — для каждого ордера вызывает `_executeLimitOrder`, что может уменьшить amount, переместить токены и добавить пользователя в settlement очередь.
+- Важные проверки — убеждается что caller whitelisted, `_processLimitOrderExecution` проверяет цены и слippage, подтверждает allowance инвестора.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L212-L239】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L320-L338】
+
+`executeLimitOrdersSafe(LimitOrderExecution[] calldata orders_)`
+- Кто может вызывать — authorizedKeeper.
+- Что делает — пытается исполнить каждый ордер и фиксирует неудачи событием без общего отката.
+- Побочные эффекты — при ошибке эмитирует `LimitOrderExecutionFailed`, успешные ордера обрабатываются как в обычной версии.
+- Важные проверки — тот же whitelist keeper, внутренние проверки `_executeLimitOrder` обеспечивают контроль цены и доступа.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L221-L231】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L283-L339】
 
 `executeSettlementOrders(SettlementOrderExecution[] calldata orders_)`
-* Кто может вызывать — только authorizedKeeper.
-* Что делает — завершает settlement ордера инвесторов: удаляет их из очереди и вызывает EasySwapperV2.completeLimitOrderWithdrawalFor с расчётом минимального приёма токена.
-* Побочные эффекты — может конвертировать активы в settlement токен, эмитирует SettlementOrderExecuted и удаляет пользователя из usersToSettle.
-* Важные require / проверки безопасности — проверяет право вызова, валидирует, что destData.destToken совпадает с limitOrderSettlementToken, рассчитывает минимальное количество через цены PoolFactory и defaultSlippageTolerance.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L233-L381】
+- Кто может вызывать — authorizedKeeper.
+- Что делает — завершает очередь settlement, сводя активы vault в settlement токен через EasySwapperV2.
+- Побочные эффекты — для каждого пользователя вызывает `_executeSettlementOrder`, что удаляет адрес из `usersToSettle` и эмитирует `SettlementOrderExecuted`.
+- Важные проверки — проверяет whitelist keeper; внутри `_executeSettlementOrder` сверяет, что dest токен совпадает с `limitOrderSettlementToken` и рассчитывает минимальное количество с учётом `defaultSlippageTolerance`.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L233-L380】
+
+`executeSettlementOrdersSafe(SettlementOrderExecution[] calldata orders_)`
+- Кто может вызывать — authorizedKeeper.
+- Что делает — выполняет settlement по каждому пользователю, продолжая при ошибках.
+- Побочные эффекты — при ошибке эмитирует `SettlementOrderExecutionFailed`, успешные вызовы идентичны `executeSettlementOrders`.
+- Важные проверки — остаются в `_executeSettlementOrder`; whitelist проверяется модификатором.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L241-L249】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L341-L380】
 
 `deleteLimitOrders(bytes32[] calldata orderIds_)`
-* Кто может вызывать — только authorizedKeeper.
-* Что делает — удаляет несколько ордеров из хранения, если инвестор уже вывел активы или отозвал allowance.
-* Побочные эффекты — очищает записи и эмитирует LimitOrderDeleted для каждого ордера.
-* Важные require / проверки безопасности — после удаления проверяет баланс и allowance инвестора, иначе откатывает операцию для ордера.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L253-L265】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L402-L412】
+- Кто может вызывать — authorizedKeeper.
+- Что делает — удаляет список ордеров (например, после ручного вывода инвестором).
+- Побочные эффекты — вызывает `_removeLimitOrder` для каждого id, эмитирует `LimitOrderDeleted` и при необходимости отклоняет удаление.
+- Важные проверки — `_canDeleteLimitOrder` требует, чтобы у инвестора не было баланса или allowance пула; при несоблюдении условий операция ревертится.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L253-L265】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L402-L412】
 
-### Настройки владельца
+### Просмотр состояния
+`getAllLimitOrderIds()`
+- Кто может вызывать — любой адрес.
+- Что делает — возвращает массив идентификаторов активных ордеров.
+- Побочные эффекты — нет.
+- Важные проверки — нет, чтение из `limitOrderIds`.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L267-L271】
+
+`getAllUsersToSettle()`
+- Кто может вызывать — любой адрес.
+- Что делает — возвращает список пользователей, ожидающих settlement.
+- Побочные эффекты — нет.
+- Важные проверки — нет, чтение из `usersToSettle`.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L273-L277】
+
+### Управление keeper и параметрами
 `addAuthorizedKeeper(address keeper_)`
-* Кто может вызывать — только limitOrderManagerOwner.
-* Что делает — добавляет адрес в whitelist исполнителей.
-* Побочные эффекты — ставит флаг isAuthorizedKeeper[keeper_] = true, эмитирует AuthorizedKeeperAdded.
-* Важные require / проверки безопасности — ограничено владельцем, дополнительных проверок нет.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L504-L510】
+- Кто может вызывать — limitOrderManagerOwner.
+- Что делает — добавляет keeper в whitelist.
+- Побочные эффекты — ставит `isAuthorizedKeeper[keeper_] = true`, эмитирует `AuthorizedKeeperAdded`.
+- Важные проверки — нет дополнительных проверок адреса. 【F:contracts/limitOrders/PoolLimitOrderManager.sol†L504-L510】
 
 `removeAuthorizedKeeper(address keeper_)`
-* Кто может вызывать — только limitOrderManagerOwner.
-* Что делает — удаляет адрес из whitelist исполнителей.
-* Побочные эффекты — сбрасывает флаг до false, эмитирует AuthorizedKeeperRemoved.
-* Важные require / проверки безопасности — ограничено владельцем.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L512-L518】
+- Кто может вызывать — limitOrderManagerOwner.
+- Что делает — исключает keeper из whitelist.
+- Побочные эффекты — устанавливает `isAuthorizedKeeper[keeper_] = false`, эмитирует `AuthorizedKeeperRemoved`.
+- Важные проверки — нет дополнительных проверок адреса. 【F:contracts/limitOrders/PoolLimitOrderManager.sol†L512-L518】
 
 `setDefaultSlippageTolerance(uint16 defaultSlippageTolerance_)`
-* Кто может вызывать — только limitOrderManagerOwner.
-* Что делает — задаёт глобальный предел проскальзывания для свопов settlement и withdrawData.
-* Побочные эффекты — обновляет defaultSlippageTolerance, эмитирует SlippageToleranceSet.
-* Важные require / проверки безопасности — значение должно быть >0 и <= SLIPPAGE_DENOMINATOR, иначе revert InvalidValue("slippage").【F:contracts/limitOrders/PoolLimitOrderManager.sol†L520-L524】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L414-L421】
+- Кто может вызывать — limitOrderManagerOwner.
+- Что делает — обновляет глобальный лимит проскальзывания для исполнения ордеров.
+- Побочные эффекты — задаёт `defaultSlippageTolerance`, эмитирует `SlippageToleranceSet`.
+- Важные проверки — значение должно быть >0 и ≤10_000, иначе `InvalidValue`.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L520-L523】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L414-L420】
 
 `setPoolFactory(IPoolFactory poolFactory_)`
-* Кто может вызывать — только limitOrderManagerOwner.
-* Что делает — переназначает фабрику пулов для валидации и цен.
-* Побочные эффекты — обновляет poolFactory.
-* Важные require / проверки безопасности — запрещает нулевой адрес через ZeroAddress("poolFactory").【F:contracts/limitOrders/PoolLimitOrderManager.sol†L526-L530】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L423-L427】
+- Кто может вызывать — limitOrderManagerOwner.
+- Что делает — переназначает фабрику пулов для валидации активов.
+- Побочные эффекты — обновляет `poolFactory`.
+- Важные проверки — запрещает нулевой адрес. 【F:contracts/limitOrders/PoolLimitOrderManager.sol†L526-L529】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L423-L427】
 
 `setEasySwapper(IEasySwapperV2 easySwapper_)`
-* Кто может вызывать — только limitOrderManagerOwner.
-* Что делает — назначает EasySwapperV2 для исполнения ордеров.
-* Побочные эффекты — обновляет easySwapper.
-* Важные require / проверки безопасности — запрещает нулевой адрес через ZeroAddress("easySwapper").【F:contracts/limitOrders/PoolLimitOrderManager.sol†L532-L536】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L429-L433】
+- Кто может вызывать — limitOrderManagerOwner.
+- Что делает — указывает EasySwapperV2, который выполняет выводы.
+- Побочные эффекты — обновляет `easySwapper`.
+- Важные проверки — запрещает нулевой адрес. 【F:contracts/limitOrders/PoolLimitOrderManager.sol†L532-L535】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L429-L433】
 
 `setLimitOrderSettlementToken(address limitOrderSettlementToken_)`
-* Кто может вызывать — только limitOrderManagerOwner.
-* Что делает — выбирает токен, который будет получен при settle.
-* Побочные эффекты — обновляет limitOrderSettlementToken, эмитирует SettlementTokenSet.
-* Важные require / проверки безопасности — проверяет asset через poolFactory.isValidAsset().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L538-L542】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L435-L441】
-
-`salvage(address token, uint256 amount)`
-* Кто может вызывать — не найдено в коде.
-* Что делает — не найдено в коде.
-* Побочные эффекты — не найдено в коде.
-* Важные require / проверки безопасности — не найдено в коде.
+- Кто может вызывать — limitOrderManagerOwner.
+- Что делает — задаёт токен, который получают пользователи при settlement.
+- Побочные эффекты — обновляет `limitOrderSettlementToken`, эмитирует `SettlementTokenSet`.
+- Важные проверки — токен должен быть валидным активом `poolFactory`.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L538-L541】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L435-L441】
 
 ## Events
-* `LimitOrderCreated(address user, address pool, bytes32 id)` — ордер создан и записан.  Эмитится в: createLimitOrder().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L170-L197】
-* `LimitOrderDeleted(address user, address pool, bytes32 id)` — ордер удалён из хранения.  Эмитится в: deleteLimitOrder(), _executeLimitOrder(), _removeLimitOrder(), deleteLimitOrders().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L202-L392】
-* `LimitOrderModified(address user, address pool, bytes32 id)` — параметры ордера изменены.  Эмитится в: modifyLimitOrder(), _executeLimitOrder() при частичном исполнении.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L185-L301】
-* `LimitOrderExecuted(address user, address pool, bytes32 id)` — ордер исполнен полностью.  Эмитится в: _executeLimitOrder().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L283-L312】
-* `LimitOrderExecutedPartially(address user, address pool, bytes32 id, uint256 amount)` — частичное исполнение ордера.  Эмитится в: _executeLimitOrder().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L290-L303】
-* `LimitOrderExecutionFailed(bytes32 id, bytes reason)` — попытка исполнения завершилась revert.  Эмитится в: executeLimitOrdersSafe().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L221-L230】
-* `SettlementOrderCreated(address user)` — инвестор добавлен в очередь settlement.  Эмитится в: _processLimitOrderExecution().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L332-L338】
-* `SettlementOrderDeleted(address user)` — инвестор удалён из очереди settlement.  Эмитится в: _removeSettlementOrder().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L394-L399】
-* `SettlementOrderExecuted(address user, uint256 destTokenAmountReceived)` — завершён swap в settlement токен.  Эмитится в: _executeSettlementOrder().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L341-L381】
-* `SettlementOrderExecutionFailed(address user, bytes reason)` — попытка settlement завершилась revert.  Эмитится в: executeSettlementOrdersSafe().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L241-L250】
-* `AuthorizedKeeperAdded(address keeper)` — keeper добавлен.  Эмитится в: addAuthorizedKeeper().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L504-L510】
-* `AuthorizedKeeperRemoved(address keeper)` — keeper удалён.  Эмитится в: removeAuthorizedKeeper().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L512-L518】
-* `SlippageToleranceSet(uint16 slippageTolerance)` — обновлена глобальная толерантность к проскальзыванию.  Эмитится в: _setDefaultSlippageTolerance().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L414-L421】
-* `SettlementTokenSet(address token)` — установлен новый settlement токен.  Эмитится в: _setLimitOrderSettlementToken().【F:contracts/limitOrders/PoolLimitOrderManager.sol†L435-L441】
+- `LimitOrderCreated(address user, address pool, bytes32 id)` — создание лимитного ордера. Эмитится в — `createLimitOrder()`.
+- `LimitOrderDeleted(address user, address pool, bytes32 id)` — удаление ордера. Эмитится в — `_removeLimitOrder()` и частичном исполнении при полном закрытии. 【F:contracts/limitOrders/PoolLimitOrderManager.sol†L202-L391】
+- `LimitOrderModified(address user, address pool, bytes32 id)` — обновление параметров ордера или уменьшение суммы при частичном исполнении. Эмитится в — `modifyLimitOrder()` и `_executeLimitOrder()` при частичной сделке. 【F:contracts/limitOrders/PoolLimitOrderManager.sol†L190-L311】
+- `LimitOrderExecuted(address user, address pool, bytes32 id)` — полное исполнение ордера. Эмитится в — `_executeLimitOrder()` при полном погашении. 【F:contracts/limitOrders/PoolLimitOrderManager.sol†L283-L312】
+- `LimitOrderExecutedPartially(address user, address pool, bytes32 id, uint256 amount)` — частичное исполнение. Эмитится в — `_executeLimitOrder()` при снижении amount. 【F:contracts/limitOrders/PoolLimitOrderManager.sol†L290-L302】
+- `LimitOrderExecutionFailed(bytes32 id, bytes reason)` — фиксация ошибки исполнения. Эмитится в — `executeLimitOrdersSafe()`.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L221-L229】
+- `SettlementOrderCreated(address user)` — постановка пользователя в очередь settlement. Эмитится в — `_processLimitOrderExecution()`.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L336-L338】
+- `SettlementOrderDeleted(address user)` — удаление пользователя из очереди. Эмитится в — `_removeSettlementOrder()`.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L394-L399】
+- `SettlementOrderExecuted(address user, uint256 destTokenAmountReceived)` — успешный settlement. Эмитится в — `_executeSettlementOrder()`.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L341-L380】
+- `SettlementOrderExecutionFailed(address user, bytes reason)` — ошибка при settlement. Эмитится в — `executeSettlementOrdersSafe()`.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L241-L249】
+- `AuthorizedKeeperAdded(address keeper)` — добавление keeper. Эмитится в — `addAuthorizedKeeper()`.
+- `AuthorizedKeeperRemoved(address keeper)` — удаление keeper. Эмитится в — `removeAuthorizedKeeper()`.
+- `SlippageToleranceSet(uint16 slippageTolerance)` — обновление `defaultSlippageTolerance`. Эмитится в — `_setDefaultSlippageTolerance()` и косвенно через `setDefaultSlippageTolerance()`.
+- `SettlementTokenSet(address token)` — установка settlement токена. Эмитится в — `_setLimitOrderSettlementToken()`.
 
 ## Безопасность и контроль доступа
-authorizedKeeper может переводить долевые токены пулов и активировать выводы через EasySwapperV2, но ограничен существующими ордерами, проверками цен и лимитом проскальзывания; без ордера исполнение невозможно.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L212-L339】
-limitOrderManagerOwner определяет пул фабрики, адрес EasySwapper, список keeper и settlement токен, тем самым контролируя какие активы и маршруты разрешены и кто может их исполнять.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L504-L542】
-investor создаёт и отменяет только свои ордера и не может назначить keeper или поменять лимиты, поэтому должен доверять keeper и владельцу контракта относительно своевременного исполнения и корректности цен.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L170-L265】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L504-L542】
+- limitOrderManagerOwner назначает фабрику, EasySwapperV2, settlement токен и управляет списком authorizedKeeper, тем самым контролируя доступ к исполнению ордеров и допустимый уровень проскальзывания.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L149-L541】
+- authorizedKeeper исполняет лимитные и settlement ордера, но каждый вызов проверяется на валидность ордера, цены и лимиты проскальзывания, а также ограничен whitelist-ом. 【F:contracts/limitOrders/PoolLimitOrderManager.sol†L212-L380】
+- investor создаёт, изменяет и удаляет собственные ордера и должен предоставить allowance долевых токенов; проверки `_validateLimitOrderInfo` гарантируют корректность пула, активов и цен. 【F:contracts/limitOrders/PoolLimitOrderManager.sol†L170-L205】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L443-L466】
+- poolManager косвенно участвует, поскольку исполнение ордеров проходит через EasySwapperV2 и WithdrawalVault пула; контракт не даёт poolManager дополнительных прав и опирается на правила, заданные фабрикой и guard настройками пула. 【F:contracts/limitOrders/PoolLimitOrderManager.sol†L320-L380】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L443-L488】
