@@ -1,254 +1,335 @@
 # PoolFactory
 
-PoolFactory развёртывает новые пулы на базе прокси PoolLogic и PoolManagerLogic.
-Хранит глобальные лимиты комиссий, допустимых активов, exit cooldown и флаги паузы.
-Поддерживает ссылки на guard системы, AssetHandler и daoAddress как feeRecipient.
-Позволяет пулу ретранслировать события через фабрику для удобства индексаторов.
+PoolFactory разворачивает новые пулы как пару прокси PoolLogic и PoolManagerLogic.
+Хранит глобальные лимиты комиссий, лимиты по активам, exit cooldown и флаги пауз.
+Сохраняет daoAddress для feeRecipient, guard-настройки и ссылку на AssetHandler.
+Держит реестр валидных пулов для фронтенда и бэкенда.
 
 ## Состояние
-* `deployedFunds (address[])` — список всех развёрнутых пулов для фронтенда и бэкенда.【F:contracts/PoolFactory.sol†L98-L243】
-  Кто может менять — автоматически внутри createFund().【F:contracts/PoolFactory.sol†L184-L244】
-* `daoAddress (address)` — адрес feeRecipient, получает часть комиссий из mintManagerFee().【F:contracts/PoolFactory.sol†L100-L243】
-  Кто может менять — только poolFactoryOwner через setDAOAddress().【F:contracts/PoolFactory.sol†L274-L289】
-* `governanceAddress (address)` — источник карт contractGuard и assetGuard в IGovernance.【F:contracts/PoolFactory.sol†L101-L305】
-  Кто может менять — только poolFactoryOwner через setGovernanceAddress().【F:contracts/PoolFactory.sol†L292-L306】
-* `_assetHandler (address)` — адрес AssetHandler, даёт цены и типы активов.【F:contracts/PoolFactory.sol†L103-L492】
-  Кто может менять — только poolFactoryOwner через setAssetHandler().【F:contracts/PoolFactory.sol†L480-L492】
-* `_daoFeeNumerator (uint256)` и `_daoFeeDenominator (uint256)` — доля комиссий, отправляемая feeRecipient при mintManagerFee().【F:contracts/PoolFactory.sol†L104-L321】
-  Кто может менять — только poolFactoryOwner через setDaoFee().【F:contracts/PoolFactory.sol†L308-L322】
-* `isPool (mapping(address => bool))` — реестр валидных PoolLogic прокси для проверок доступа.【F:contracts/PoolFactory.sol†L107-L232】
-  Кто может менять — createFund() после деплоя пула.【F:contracts/PoolFactory.sol†L184-L232】
-* `maximumPerformanceFeeNumerator (uint256)` и `_MANAGER_FEE_DENOMINATOR (uint256)` — глобальные пределы performance fee и знаменатель комиссий.【F:contracts/PoolFactory.sol†L109-L396】
-  Кто может менять — только poolFactoryOwner через setMaximumFee().【F:contracts/PoolFactory.sol†L349-L397】
-* `maximumManagerFeeNumerator (uint256)` — лимит management fee для всех пулов.【F:contracts/PoolFactory.sol†L131-L397】
-  Кто может менять — только poolFactoryOwner через setMaximumFee().【F:contracts/PoolFactory.sol†L349-L397】
-* `maximumEntryFeeNumerator (uint256)` и `maximumExitFeeNumerator (uint256)` — верхние границы entry и exit fee пула.【F:contracts/PoolFactory.sol†L137-L397】【F:contracts/PoolFactory.sol†L142-L397】
-  Кто может менять — только poolFactoryOwner через setMaximumFee().【F:contracts/PoolFactory.sol†L349-L397】
-* `maximumPerformanceFeeNumeratorChange (uint256)` — ограничение шага увеличения performance fee после анонса.【F:contracts/PoolFactory.sol†L120-L405】
-  Кто может менять — только poolFactoryOwner через setMaximumPerformanceFeeNumeratorChange().【F:contracts/PoolFactory.sol†L399-L405】
-* `performanceFeeNumeratorChangeDelay (uint256)` — глобальная задержка перед вступлением в силу повышенных комиссий.【F:contracts/PoolFactory.sol†L121-L413】
-  Кто может менять — только poolFactoryOwner через setPerformanceFeeNumeratorChangeDelay().【F:contracts/PoolFactory.sol†L407-L413】
-* `_exitCooldown (uint256)` — обязательный кулдаун вывода для инвесторов всех пулов.【F:contracts/PoolFactory.sol†L113-L431】
-  Кто может менять — только poolFactoryOwner через setExitCooldown().【F:contracts/PoolFactory.sol†L415-L425】
-* `customCooldownWhitelist (mapping(address => bool))` — адреса, которым разрешён depositForWithCustomCooldown в пулах.【F:contracts/PoolFactory.sol†L128-L258】
+* daoAddress (address) — адрес feeRecipient, получает долю комиссий при mintManagerFee().【F:contracts/PoolFactory.sol†L100-L321】
+  Кто может менять — только poolFactoryOwner через setDAOAddress() или initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L274-L289】
+* governanceAddress (address) — источник contractGuard и assetGuard через IGovernance.【F:contracts/PoolFactory.sol†L101-L543】
+  Кто может менять — только poolFactoryOwner через setGovernanceAddress() или initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L292-L306】
+* _daoFeeNumerator/_daoFeeDenominator (uint256) — процент daoAddress от менеджерских комиссий пула.【F:contracts/PoolFactory.sol†L104-L329】
+  Кто может менять — только poolFactoryOwner через setDaoFee() или initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L308-L322】
+* maximumPerformanceFeeNumerator, maximumManagerFeeNumerator, maximumEntryFeeNumerator, maximumExitFeeNumerator, _MANAGER_FEE_DENOMINATOR (uint256) — верхние пределы комиссий для всех пулов.【F:contracts/PoolFactory.sol†L109-L396】
+  Кто может менять — только poolFactoryOwner через setMaximumFee() или initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L349-L397】
+* maximumPerformanceFeeNumeratorChange (uint256) — максимум шага повышения performance fee между апгрейдами.【F:contracts/PoolFactory.sol†L120-L405】
+  Кто может менять — только poolFactoryOwner через setMaximumPerformanceFeeNumeratorChange() или initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L399-L405】
+* performanceFeeNumeratorChangeDelay (uint256) — глобальная задержка на рост комиссий poolManager.【F:contracts/PoolFactory.sol†L121-L413】
+  Кто может менять — только poolFactoryOwner через setPerformanceFeeNumeratorChangeDelay() или initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L407-L413】
+* _exitCooldown (uint256) — минимальный кулдаун вывода для каждого investor в пулах.【F:contracts/PoolFactory.sol†L113-L431】
+  Кто может менять — только poolFactoryOwner через setExitCooldown() или initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L415-L425】
+* _maximumSupportedAssetCount (uint256) — предел активов, которые poolManager может держать в whitelist пула.【F:contracts/PoolFactory.sol†L115-L445】
+  Кто может менять — только poolFactoryOwner через setMaximumSupportedAssetCount() или initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L433-L445】
+* _assetHandler (address) — адрес AssetHandler, определяет цены, типы активов и список разрешённых deposit-активов.【F:contracts/PoolFactory.sol†L103-L492】
+  Кто может менять — только poolFactoryOwner через setAssetHandler() или initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L480-L492】
+* customCooldownWhitelist (mapping(address => bool)) — адреса, которым разрешён depositForWithCustomCooldown в пулах.【F:contracts/PoolFactory.sol†L128-L258】
   Кто может менять — только poolFactoryOwner через addCustomCooldownWhitelist()/removeCustomCooldownWhitelist().【F:contracts/PoolFactory.sol†L246-L258】
-* `_maximumSupportedAssetCount (uint256)` — предел активов в whitelist пула, считывается PoolManagerLogic.【F:contracts/PoolFactory.sol†L115-L451】
-  Кто может менять — только poolFactoryOwner через setMaximumSupportedAssetCount().【F:contracts/PoolFactory.sol†L433-L445】
-* `receiverWhitelist (mapping(address => bool))` — адреса, которые могут принимать заблокированные pool tokens.【F:contracts/PoolFactory.sol†L134-L272】
+* receiverWhitelist (mapping(address => bool)) — адреса, принимающие fund tokens под активным кулдауном transfer из пула.【F:contracts/PoolFactory.sol†L134-L272】
   Кто может менять — только poolFactoryOwner через addReceiverWhitelist()/removeReceiverWhitelist().【F:contracts/PoolFactory.sol†L260-L272】
-* `pausedPools (mapping(address => bool))` — глобальная блокировка депозита, вывода, mint fee и трансферов пула.【F:contracts/PoolFactory.sol†L139-L523】
-  Кто может менять — только poolFactoryOwner через setPoolsPaused().【F:contracts/PoolFactory.sol†L510-L523】
-* `tradingPausedPools (mapping(address => bool))` — флаг запрета execTransaction в выбранном пуле.【F:contracts/PoolFactory.sol†L144-L523】
-  Кто может менять — только poolFactoryOwner через setPoolsPaused().【F:contracts/PoolFactory.sol†L510-L523】
-* `paused() (bool PausableUpgradeable)` — глобальная остановка всех createFund и операций фабрики.【F:contracts/PoolFactory.sol†L204-L507】
+* paused() (bool) — глобальная пауза фабрики через PausableUpgradeable, блокирует createFund и setLogic при активации.【F:contracts/PoolFactory.sol†L204-L507】
   Кто может менять — только poolFactoryOwner через pause()/unpause().【F:contracts/PoolFactory.sol†L494-L503】
-* `poolVersion (mapping(address => uint256))`, `poolStorageVersion (uint256)`, `poolPerformanceAddress (address)` и `_exitFeeNumerator/_exitFeeDenominator` — устаревшие переменные, оставлены для совместимости хранилища.【F:contracts/PoolFactory.sol†L117-L126】
-* `PoolPausedInput` — структура для пакетного обновления флагов паузы пула.【F:contracts/PoolFactory.sol†L50-L96】
+* pausedPools (mapping(address => bool)) — флаги блокировки депозитов, выводов и fee mint для конкретных пулов.【F:contracts/PoolFactory.sol†L139-L523】
+  Кто может менять — только poolFactoryOwner через setPoolsPaused().【F:contracts/PoolFactory.sol†L510-L523】
+* tradingPausedPools (mapping(address => bool)) — запрет execTransaction для выбранных пулов.【F:contracts/PoolFactory.sol†L144-L523】
+  Кто может менять — только poolFactoryOwner через setPoolsPaused().【F:contracts/PoolFactory.sol†L510-L523】
+* deployedFunds (address[]) — список всех созданных PoolLogic прокси, нужен фронтенду и аналитике.【F:contracts/PoolFactory.sol†L98-L549】
+  Кто может менять — автоматически внутри createFund().【F:contracts/PoolFactory.sol†L184-L244】
+* isPool (mapping(address => bool)) — быстрый реестр валидных пулов для модификаторов доступа и фронтенда.【F:contracts/PoolFactory.sol†L107-L233】
+  Кто может менять — автоматически внутри createFund().【F:contracts/PoolFactory.sol†L184-L233】
+* poolLogic/poolManagerLogic (address) — шаблоны логики в ProxyFactory для новых прокси.【F:contracts/upgradability/ProxyFactory.sol†L29-L56】
+  Кто может менять — только poolFactoryOwner через setLogic() или initialize().【F:contracts/upgradability/ProxyFactory.sol†L33-L56】
 
 ## Публичные и external функции
-### Деплой и реестр пулов
-`createFund(bool _privatePool, address _manager, string _managerName, string _fundName, string _fundSymbol, uint256 _performanceFeeNumerator, uint256 _managerFeeNumerator, IHasSupportedAsset.Asset[] _supportedAssets)`
-* Кто может вызывать — любой адрес.
-* Что делает — деплоит прокси PoolLogic и PoolManagerLogic через ProxyFactory, линкует их, записывает пул в реестр и эмитит FundCreated.【F:contracts/PoolFactory.sol†L184-L244】
-* Побочные эффекты — добавляет адрес в deployedFunds и isPool, передаёт стартовые комиссии и whitelist активов прокси менеджеру.【F:contracts/PoolFactory.sol†L214-L244】
-* Важные require / проверки безопасности — запрещает вызов во время глобальной паузы фабрики.【F:contracts/PoolFactory.sol†L203-L205】
+### Создание и реестр пулов
+createFund(bool _privatePool, address _manager, string _managerName, string _fundName, string _fundSymbol, uint256 _performanceFeeNumerator, uint256 _managerFeeNumerator, IHasSupportedAsset.Asset[] _supportedAssets)
 
-`getDeployedFunds()`
-* Кто может вызывать — любой адрес.
-* Что делает — возвращает массив всех пулов для индексации интерфейсом.【F:contracts/PoolFactory.sol†L545-L549】
-* Побочные эффекты — нет.
-* Важные require / проверки безопасности — нет.
+Кто может вызывать — любой адрес.
+Что делает — деплоит прокси PoolLogic и PoolManagerLogic, связывает их, добавляет пул в реестр и записывает настройки manager fee.【F:contracts/PoolFactory.sol†L184-L244】
+Побочные эффекты — пушит адрес в deployedFunds, отмечает isPool, эмитит FundCreated.【F:contracts/PoolFactory.sol†L214-L244】
+Важные require / проверки безопасности — требует, что фабрика не на паузе инициализации, проверяет paused() через require(!paused()).【F:contracts/PoolFactory.sol†L203-L205】
 
-`getInvestedPools(address _user)`
-* Кто может вызывать — любой адрес.
-* Что делает — перечисляет пулы, где investor держит долевые токены, используя PoolLogic.balanceOf().【F:contracts/PoolFactory.sol†L551-L569】
-* Побочные эффекты — нет.
-* Важные require / проверки безопасности — нет.
+getDeployedFunds()
 
-`getManagedPools(address _manager)`
-* Кто может вызывать — любой адрес.
-* Что делает — возвращает список пулов, где указан poolManager по данным PoolManagerLogic.manager().【F:contracts/PoolFactory.sol†L571-L589】
-* Побочные эффекты — нет.
-* Важные require / проверки безопасности — нет.
+Кто может вызывать — любой адрес.
+Что делает — возвращает весь массив валидных пулов для интерфейсов.【F:contracts/PoolFactory.sol†L545-L549】
+Побочные эффекты — нет.
+Важные require / проверки безопасности — нет (view).
 
-`emitPoolEvent()`
-* Кто может вызывать — только poolLogic из реестра благодаря onlyPool модификатору.【F:contracts/PoolFactory.sol†L173-L595】
-* Что делает — пробрасывает событие PoolEvent для индексации без подписки на каждый пул.【F:contracts/PoolFactory.sol†L592-L595】
-* Побочные эффекты — эмитит PoolEvent.
-* Важные require / проверки безопасности — проверяет, что msg.sender зарегистрирован как пул.【F:contracts/PoolFactory.sol†L173-L175】
+getInvestedPools(address _user)
 
-`emitPoolManagerEvent()`
-* Кто может вызывать — только действующий PoolManagerLogic через onlyPoolManager модификатор.【F:contracts/PoolFactory.sol†L178-L599】
-* Что делает — эмитит PoolManagerEvent от имени менеджера.
-* Побочные эффекты — событие для индексации.
-* Важные require / проверки безопасности — проверяет, что msg.sender связан с валидным пулом и назначен как его менеджер.【F:contracts/PoolFactory.sol†L178-L181】
+Кто может вызывать — любой адрес.
+Что делает — фильтрует deployedFunds по наличию долей investor через PoolLogic.balanceOf().【F:contracts/PoolFactory.sol†L551-L569】
+Побочные эффекты — нет.
+Важные require / проверки безопасности — нет (view).
+
+getManagedPools(address _manager)
+
+Кто может вызывать — любой адрес.
+Что делает — возвращает пулы, где poolManagerLogic.manager() совпадает с адресом менеджера.【F:contracts/PoolFactory.sol†L571-L589】
+Побочные эффекты — нет.
+Важные require / проверки безопасности — нет (view).
+
+isPool(address pool)
+
+Кто может вызывать — любой адрес.
+Что делает — возвращает статус адреса как валидного пула из реестра isPool.【F:contracts/PoolFactory.sol†L107-L233】
+Побочные эффекты — нет.
+Важные require / проверки безопасности — нет (view).
+
+emitPoolEvent()
+
+Кто может вызывать — только зарегистрированный PoolLogic благодаря модификатору onlyPool.【F:contracts/PoolFactory.sol†L173-L595】
+Что делает — ретранслирует событие PoolEvent для индексаторов.【F:contracts/PoolFactory.sol†L592-L595】
+Побочные эффекты — эмитит PoolEvent.
+Важные require / проверки безопасности — проверяет, что msg.sender отмечен в isPool.【F:contracts/PoolFactory.sol†L173-L175】
+
+emitPoolManagerEvent()
+
+Кто может вызывать — только действующий PoolManagerLogic через onlyPoolManager.【F:contracts/PoolFactory.sol†L178-L599】
+Что делает — эмитит PoolManagerEvent от имени менеджера пула.【F:contracts/PoolFactory.sol†L597-L599】
+Побочные эффекты — событие для мониторинга.
+Важные require / проверки безопасности — проверяет связку poolManagerLogic с активным пулом.【F:contracts/PoolFactory.sol†L178-L181】
 
 ### Глобальные лимиты и комиссии
-`setMaximumFee(uint256 _maxPerformanceFeeNumerator, uint256 _maxManagerFeeNumerator, uint256 _maxEntryFeeNumerator, uint256 _maxExitFeeNumerator)`
-* Кто может вызывать — только poolFactoryOwner.
-* Что делает — обновляет верхние пределы всех комиссий и общий знаменатель, которые PoolManagerLogic обязан соблюдать.【F:contracts/PoolFactory.sol†L349-L397】
-* Побочные эффекты — влияет на будущие установки комиссий в пулах.
-* Важные require / проверки безопасности — новые значения не превышают знаменатель.【F:contracts/PoolFactory.sol†L369-L382】
+setMaximumFee(uint256 _maxPerformanceFeeNumerator, uint256 _maxManagerFeeNumerator, uint256 _maxEntryFeeNumerator, uint256 _maxExitFeeNumerator)
 
-`setMaximumPerformanceFeeNumeratorChange(uint256 _amount)`
-* Кто может вызывать — только poolFactoryOwner.
-* Что делает — задаёт глобальный лимит шага повышения performance fee, применимый к announceFeeIncrease().【F:contracts/PoolFactory.sol†L399-L405】
-* Побочные эффекты — ограничивает poolManager при повышении fee.
-* Важные require / проверки безопасности — простое присвоение с onlyOwner.
+Кто может вызывать — только poolFactoryOwner.
+Что делает — обновляет глобальные потолки комиссий и знаменатель, которыми ограничены все poolManager.【F:contracts/PoolFactory.sol†L349-L397】
+Побочные эффекты — снижает или повышает разрешённые ставки для текущих и будущих пулов.
+Важные require / проверки безопасности — каждая доля не превышает знаменатель, иначе revert invalid fraction.【F:contracts/PoolFactory.sol†L369-L382】
 
-`setPerformanceFeeNumeratorChangeDelay(uint256 _delay)`
-* Кто может вызывать — только poolFactoryOwner.
-* Что делает — устанавливает глобальную задержку перед commitFeeIncrease().【F:contracts/PoolFactory.sol†L407-L413】
-* Побочные эффекты — влияет на время, когда poolManager может применить новые комиссии.
-* Важные require / проверки безопасности — onlyOwner.
+setMaximumPerformanceFeeNumeratorChange(uint256 _amount)
 
-`setExitCooldown(uint256 _cooldown)`
-* Кто может вызывать — только poolFactoryOwner.
-* Что делает — задаёт единый exit cooldown для всех инвесторов, который проверяет PoolLogic при выводе.【F:contracts/PoolFactory.sol†L415-L425】
-* Побочные эффекты — меняет обязательную задержку перед withdraw.
-* Важные require / проверки безопасности — onlyOwner.
+Кто может вызывать — только poolFactoryOwner.
+Что делает — задаёт максимум разового повышения performance fee менеджера.【F:contracts/PoolFactory.sol†L399-L405】
+Побочные эффекты — влияет на расчёт лимитов в PoolManagerLogic.
+Важные require / проверки безопасности — только проверка прав.
 
-`setMaximumSupportedAssetCount(uint256 _count)`
-* Кто может вызывать — только poolFactoryOwner.
-* Что делает — обновляет лимит supportedAssets для каждого пула.【F:contracts/PoolFactory.sol†L433-L445】
-* Побочные эффекты — ограничивает poolManager при добавлении активов.
-* Важные require / проверки безопасности — onlyOwner.
+setPerformanceFeeNumeratorChangeDelay(uint256 _delay)
 
-`setDaoFee(uint256 _numerator, uint256 _denominator)`
-* Кто может вызывать — только poolFactoryOwner.
-* Что делает — задаёт долю комиссий, уходящих feeRecipient при mintManagerFee().【F:contracts/PoolFactory.sol†L308-L322】
-* Побочные эффекты — изменяет распределение между feeRecipient и poolManager.
-* Важные require / проверки безопасности — проверяет, что numerator не превышает denominator.【F:contracts/PoolFactory.sol†L315-L322】
+Кто может вызывать — только poolFactoryOwner.
+Что делает — устанавливает задержку перед вступлением в силу повышения performance fee.【F:contracts/PoolFactory.sol†L407-L413】
+Побочные эффекты — влияет на расписание повышения комиссий.
+Важные require / проверки безопасности — только проверка прав.
 
-`setDAOAddress(address _daoAddress)`
-* Кто может вызывать — только poolFactoryOwner.
-* Что делает — обновляет feeRecipient (daoAddress), куда перечисляется доля DAO.【F:contracts/PoolFactory.sol†L274-L289】
-* Побочные эффекты — меняет получателя комиссий.
-* Важные require / проверки безопасности — запрещает нулевой адрес.【F:contracts/PoolFactory.sol†L284-L289】
+setDaoFee(uint256 _numerator, uint256 _denominator)
 
-`setGovernanceAddress(address _governanceAddress)`
-* Кто может вызывать — только poolFactoryOwner.
-* Что делает — обновляет источник guard конфигурации и governance хуков.【F:contracts/PoolFactory.sol†L292-L306】
-* Побочные эффекты — переключает контракты с картами guard.
-* Важные require / проверки безопасности — проверяет ненулевой адрес.【F:contracts/PoolFactory.sol†L300-L306】
+Кто может вызывать — только poolFactoryOwner.
+Что делает — задаёт долю daoAddress в новых manager fee mint.【F:contracts/PoolFactory.sol†L308-L322】
+Побочные эффекты — меняет будущую долю feeRecipient по всем пулам.
+Важные require / проверки безопасности — числитель не больше знаменателя, иначе revert invalid fraction.【F:contracts/PoolFactory.sol†L315-L321】
 
-### Паузы и безопасность
-`pause()` / `unpause()`
-* Кто может вызывать — только poolFactoryOwner.
-* Что делает — включает или снимает глобальную паузу фабрики PausableUpgradeable.【F:contracts/PoolFactory.sol†L494-L503】
-* Побочные эффекты — запрещает createFund и любые функции с whenNotPaused у наследников.
-* Важные require / проверки безопасности — onlyOwner от OpenZeppelin PausableUpgradeable.
+setDAOAddress(address _daoAddress)
 
-`isPaused()`
-* Кто может вызывать — любой адрес.
-* Что делает — возвращает текущий статус глобальной паузы фабрики.【F:contracts/PoolFactory.sol†L504-L508】
-* Побочные эффекты — нет.
-* Важные require / проверки безопасности — нет.
+Кто может вызывать — только poolFactoryOwner.
+Что делает — обновляет адрес feeRecipient для распределения комиссий.【F:contracts/PoolFactory.sol†L274-L289】
+Побочные эффекты — перенаправляет потоки комиссий DAO.
+Важные require / проверки безопасности — запрещает нулевой адрес.【F:contracts/PoolFactory.sol†L284-L289】
 
-`setPoolsPaused(PoolPausedInput[] _pools)`
-* Кто может вызывать — только poolFactoryOwner.
-* Что делает — массово обновляет pausedPools и tradingPausedPools для конкретных пулов, действуя как стоп-кран по депозитам, выводам и торговле.【F:contracts/PoolFactory.sol†L510-L523】
-* Побочные эффекты — PoolLogic читает эти флаги и блокирует deposit, withdraw, execTransaction при true.
-* Важные require / проверки безопасности — проверяет, что адрес действительно зарегистрирован как пул.【F:contracts/PoolFactory.sol†L517-L523】
+setMaximumSupportedAssetCount(uint256 _count)
+
+Кто может вызывать — только poolFactoryOwner.
+Что делает — задаёт максимум активов в whitelist пула.【F:contracts/PoolFactory.sol†L433-L445】
+Побочные эффекты — ограничивает poolManager при добавлении активов.
+Важные require / проверки безопасности — только проверка прав.
+
+setExitCooldown(uint256 _cooldown)
+
+Кто может вызывать — только poolFactoryOwner.
+Что делает — устанавливает глобальный кулдаун вывода для инвесторов.【F:contracts/PoolFactory.sol†L415-L425】
+Побочные эффекты — влияет на блокировку withdraw во всех пулах.
+Важные require / проверки безопасности — только проверка прав.
+
+setLogic(address _poolLogic, address _poolManagerLogic)
+
+Кто может вызывать — только poolFactoryOwner.
+Что делает — обновляет шаблоны логики прокси для новых пулов.【F:contracts/upgradability/ProxyFactory.sol†L47-L56】
+Побочные эффекты — будущие createFund используют новые реализации.
+Важные require / проверки безопасности — запрещает нулевые адреса логик.【F:contracts/upgradability/ProxyFactory.sol†L50-L55】
+
+### Паузы и аварийные рычаги
+pause()
+
+Кто может вызывать — только poolFactoryOwner.
+Что делает — включает глобальную паузу фабрики и блокирует createFund и другие функции с whenNotPaused в пулах.【F:contracts/PoolFactory.sol†L494-L507】
+Побочные эффекты — задействует paused(), влияет на модификаторы whenNotFactoryPaused в пулах.
+Важные require / проверки безопасности — только проверка прав.
+
+unpause()
+
+Кто может вызывать — только poolFactoryOwner.
+Что делает — снимает глобальную паузу фабрики.【F:contracts/PoolFactory.sol†L499-L507】
+Побочные эффекты — восстановление createFund.
+Важные require / проверки безопасности — только проверка прав.
+
+setPoolsPaused(PoolPausedInput[] calldata _pools)
+
+Кто может вызывать — только poolFactoryOwner.
+Что делает — пакетно обновляет pausedPools и tradingPausedPools для указанных пулов.【F:contracts/PoolFactory.sol†L510-L523】
+Побочные эффекты — блокирует депозиты, выводы, mint fee и торговлю в затронутых пулах, эмитит PoolPauseStatusChanged.【F:contracts/PoolFactory.sol†L510-L523】
+Важные require / проверки безопасности — проверяет, что каждый адрес зарегистрирован в isPool.【F:contracts/PoolFactory.sol†L517-L523】
 
 ### Guards и whitelist активов
-`setAssetHandler(address _handler)`
-* Кто может вызывать — только poolFactoryOwner.
-* Что делает — назначает новый AssetHandler, предоставляющий цены и типы активов для всех пулов.【F:contracts/PoolFactory.sol†L480-L492】
-* Побочные эффекты — меняет источник данных для isValidAsset и getAssetPrice.
-* Важные require / проверки безопасности — отклоняет нулевой адрес.【F:contracts/PoolFactory.sol†L486-L492】
+setAssetHandler(address _handler)
 
-`isValidAsset(address _asset)`
-* Кто может вызывать — любой адрес.
-* Что делает — проверяет, есть ли прайс-агрегатор в AssetHandler, выступает глобальной проверкой whitelist активов.【F:contracts/PoolFactory.sol†L453-L458】
-* Побочные эффекты — нет.
-* Важные require / проверки безопасности — нет.
+Кто может вызывать — только poolFactoryOwner.
+Что делает — обновляет адрес AssetHandler для проверок активов и цен.【F:contracts/PoolFactory.sol†L480-L492】
+Побочные эффекты — изменяет источник isValidAsset и getAssetPrice для всех пулов.
+Важные require / проверки безопасности — запрещает нулевой адрес.【F:contracts/PoolFactory.sol†L486-L492】
 
-`getContractGuard(address _extContract)`
-* Кто может вызывать — любой адрес.
-* Что делает — возвращает назначенный contractGuard через governanceAddress для проверки сделок пула.【F:contracts/PoolFactory.sol†L528-L533】
-* Побочные эффекты — нет.
-* Важные require / проверки безопасности — нет.
+addCustomCooldownWhitelist(address _extAddress) / removeCustomCooldownWhitelist(address _extAddress)
 
-`getAssetGuard(address _extAsset)`
-* Кто может вызывать — любой адрес.
-* Что делает — возвращает guard для типа актива через governanceAddress, если актив поддерживается.【F:contracts/PoolFactory.sol†L535-L543】
-* Побочные эффекты — нет.
-* Важные require / проверки безопасности — проверяет isValidAsset перед запросом guard.【F:contracts/PoolFactory.sol†L539-L543】
+Кто может вызывать — только poolFactoryOwner.
+Что делает — управляет адресами, которым разрешён кастомный депозитный кулдаун в пулах.【F:contracts/PoolFactory.sol†L246-L258】
+Побочные эффекты — обновляет customCooldownWhitelist.
+Важные require / проверки безопасности — только проверка прав.
 
-`addCustomCooldownWhitelist(address _extAddress)` / `removeCustomCooldownWhitelist(address _extAddress)`
-* Кто может вызывать — только poolFactoryOwner.
-* Что делает — управляет адресами, которые могут инициировать депозиты с кастомным кулдауном в пулах.【F:contracts/PoolFactory.sol†L246-L258】
-* Побочные эффекты — обновляет customCooldownWhitelist.
-* Важные require / проверки безопасности — нет кроме onlyOwner.
+addReceiverWhitelist(address _extAddress) / removeReceiverWhitelist(address _extAddress)
 
-`addReceiverWhitelist(address _extAddress)` / `removeReceiverWhitelist(address _extAddress)`
-* Кто может вызывать — только poolFactoryOwner.
-* Что делает — управляет списком адресов, принимающих токены с активным кулдауном, что контролирует передачу заблокированных долей.【F:contracts/PoolFactory.sol†L260-L272】
-* Побочные эффекты — обновляет receiverWhitelist.
-* Важные require / проверки безопасности — нет кроме onlyOwner.
+Кто может вызывать — только poolFactoryOwner.
+Что делает — управляет адресами, принимающими fund tokens под кулдауном transfer.【F:contracts/PoolFactory.sol†L260-L272】
+Побочные эффекты — обновляет receiverWhitelist.
+Важные require / проверки безопасности — только проверка прав.
 
-### Вспомогательные view
-`getDaoFee()`
-* Кто может вызывать — любой адрес.
-* Что делает — возвращает текущую долю комиссий feeRecipient и знаменатель.【F:contracts/PoolFactory.sol†L324-L329】
-* Побочные эффекты — нет.
-* Важные require / проверки безопасности — нет.
+setGovernanceAddress(address _governanceAddress)
 
-`getMaximumFee()`
-* Кто может вызывать — любой адрес.
-* Что делает — выдаёт лимиты всех комиссий и знаменатель для интерфейсов и PoolManagerLogic.【F:contracts/PoolFactory.sol†L333-L347】
-* Побочные эффекты — нет.
-* Важные require / проверки безопасности — нет.
+Кто может вызывать — только poolFactoryOwner.
+Что делает — переназначает governanceAddress, влияя на contractGuard и assetGuard маппинги.【F:contracts/PoolFactory.sol†L292-L306】
+Побочные эффекты — меняет источник guard-проверок для пулов.
+Важные require / проверки безопасности — запрещает нулевой адрес.【F:contracts/PoolFactory.sol†L300-L306】
 
-`getExitCooldown()`
-* Кто может вызывать — любой адрес.
-* Что делает — сообщает глобальный кулдаун выхода, используемый PoolLogic при проверке withdraw.【F:contracts/PoolFactory.sol†L427-L431】
-* Побочные эффекты — нет.
-* Важные require / проверки безопасности — нет.
+getContractGuard(address _extContract)
 
-`getMaximumSupportedAssetCount()`
-* Кто может вызывать — любой адрес.
-* Что делает — возвращает лимит активов, чтобы frontends и poolManager знали потолок whitelist.【F:contracts/PoolFactory.sol†L433-L451】
-* Побочные эффекты — нет.
-* Важные require / проверки безопасности — нет.
+Кто может вызывать — любой адрес.
+Что делает — читает назначенный contractGuard из governanceAddress для контроля транзакций пула.【F:contracts/PoolFactory.sol†L528-L533】
+Побочные эффекты — нет.
+Важные require / проверки безопасности — нет (view).
 
-`getAssetPrice(address _asset)` / `getAssetType(address _asset)` / `getAssetHandler()`
-* Кто может вызывать — любой адрес.
-* Что делает — проксирует цены, типы и адрес AssetHandler для отображения и проверок пула.【F:contracts/PoolFactory.sol†L460-L478】
-* Побочные эффекты — нет.
-* Важные require / проверки безопасности — нет.
+getAssetGuard(address _extAsset)
+
+Кто может вызывать — любой адрес.
+Что делает — возвращает guard для типа актива, если asset допущен AssetHandler.【F:contracts/PoolFactory.sol†L535-L543】
+Побочные эффекты — нет.
+Важные require / проверки безопасности — проверяет isValidAsset перед доступом к guard.【F:contracts/PoolFactory.sol†L539-L543】
+
+### View-функции конфигурации
+getDaoFee()
+
+Кто может вызывать — любой адрес.
+Что делает — возвращает текущий numerator и denominator для доли feeRecipient.【F:contracts/PoolFactory.sol†L324-L329】
+Побочные эффекты — нет.
+Важные require / проверки безопасности — нет (view).
+
+getMaximumFee()
+
+Кто может вызывать — любой адрес.
+Что делает — показывает верхние границы комиссий и знаменатель для интерфейсов и пулов.【F:contracts/PoolFactory.sol†L333-L347】
+Побочные эффекты — нет.
+Важные require / проверки безопасности — нет (view).
+
+getExitCooldown()
+
+Кто может вызывать — любой адрес.
+Что делает — возвращает глобальный кулдаун вывода для проверки в PoolLogic.【F:contracts/PoolFactory.sol†L427-L431】
+Побочные эффекты — нет.
+Важные require / проверки безопасности — нет (view).
+
+getMaximumSupportedAssetCount()
+
+Кто может вызывать — любой адрес.
+Что делает — сообщает лимит активов для whitelist пула.【F:contracts/PoolFactory.sol†L433-L451】
+Побочные эффекты — нет.
+Важные require / проверки безопасности — нет (view).
+
+getAssetHandler()
+
+Кто может вызывать — любой адрес.
+Что делает — возвращает адрес текущего AssetHandler для клиентов и пулов.【F:contracts/PoolFactory.sol†L474-L478】
+Побочные эффекты — нет.
+Важные require / проверки безопасности — нет (view).
+
+isValidAsset(address _asset)
+
+Кто может вызывать — любой адрес.
+Что делает — проверяет, поддерживает ли AssetHandler актив и разрешён ли депозит.【F:contracts/PoolFactory.sol†L453-L458】
+Побочные эффекты — нет.
+Важные require / проверки безопасности — нет (view).
+
+tradingPausedPools(address pool)
+
+Кто может вызывать — любой адрес.
+Что делает — показывает, запрещены ли execTransaction для пула.【F:contracts/PoolFactory.sol†L144-L523】
+Побочные эффекты — нет.
+Важные require / проверки безопасности — нет (view).
+
+pausedPools(address pool)
+
+Кто может вызывать — любой адрес.
+Что делает — показывает, заблокированы ли депозиты и выводы пула через фабрику.【F:contracts/PoolFactory.sol†L139-L523】
+Побочные эффекты — нет.
+Важные require / проверки безопасности — нет (view).
+
+isPaused()
+
+Кто может вызывать — любой адрес.
+Что делает — возвращает статус глобальной паузы фабрики.【F:contracts/PoolFactory.sol†L504-L507】
+Побочные эффекты — нет.
+Важные require / проверки безопасности — нет (view).
+
+getAssetPrice(address _asset) / getAssetType(address _asset)
+
+Кто может вызывать — любой адрес.
+Что делает — проксирует USD цену и тип актива через AssetHandler для отображения и проверок пула.【F:contracts/PoolFactory.sol†L460-L472】
+Побочные эффекты — нет.
+Важные require / проверки безопасности — нет (view).
 
 ## Events
-* `FundCreated(address fundAddress, bool isPoolPrivate, string fundName, string managerName, address manager, uint256 time, uint256 performanceFeeNumerator, uint256 managerFeeNumerator, uint256 managerFeeDenominator)` — сигнал развёртывания нового пула с начальными параметрами.【F:contracts/PoolFactory.sol†L56-L243】
-  Эмитится в: createFund().【F:contracts/PoolFactory.sol†L184-L244】
-* `PoolEvent(address poolAddress)` — единая точка подписки на события пула через фабрику.【F:contracts/PoolFactory.sol†L68-L595】
-  Эмитится в: emitPoolEvent().【F:contracts/PoolFactory.sol†L592-L595】
-* `PoolManagerEvent(address poolManagerAddress)` — прокси событие для действий PoolManagerLogic.【F:contracts/PoolFactory.sol†L70-L599】
-  Эмитится в: emitPoolManagerEvent().【F:contracts/PoolFactory.sol†L597-L599】
-* `DAOAddressSet(address daoAddress)` — фиксация нового feeRecipient.【F:contracts/PoolFactory.sol†L72-L289】
-  Эмитится в: setDAOAddress() и initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L274-L289】
-* `GovernanceAddressSet(address governanceAddress)` — обновление governanceAddress для guard системы.【F:contracts/PoolFactory.sol†L74-L306】
-  Эмитится в: setGovernanceAddress() и initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L292-L306】
-* `DaoFeeSet(uint256 numerator, uint256 denominator)` — изменение доли комиссий feeRecipient.【F:contracts/PoolFactory.sol†L76-L321】
-  Эмитится в: setDaoFee() и initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L308-L322】
-* `ExitCooldownSet(uint256 cooldown)` — новая величина exit cooldown для всех пулов.【F:contracts/PoolFactory.sol†L78-L425】
-  Эмитится в: setExitCooldown() и initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L415-L425】
-* `MaximumSupportedAssetCountSet(uint256 count)` — изменение лимита активов пула.【F:contracts/PoolFactory.sol†L80-L445】
-  Эмитится в: setMaximumSupportedAssetCount() и initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L433-L445】
-* `SetMaximumFee(uint256 performanceFeeNumerator, uint256 managerFeeNumerator, uint256 entryFeeNumerator, uint256 exitFeeNumerator, uint256 denominator)` — новые глобальные потолки комиссий.【F:contracts/PoolFactory.sol†L82-L396】
-  Эмитится в: setMaximumFee() и initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L349-L397】
-* `SetMaximumPerformanceFeeNumeratorChange(uint256 amount)` — обновление лимита шага повышения performance fee.【F:contracts/PoolFactory.sol†L90-L405】
-  Эмитится в: setMaximumPerformanceFeeNumeratorChange() и initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L399-L405】
-* `SetAssetHandler(address assetHandler)` — фиксация нового AssetHandler.【F:contracts/PoolFactory.sol†L92-L492】
-  Эмитится в: setAssetHandler() и initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L480-L492】
-* `SetPerformanceFeeNumeratorChangeDelay(uint256 delay)` — изменение глобального таймлока на рост комиссий.【F:contracts/PoolFactory.sol†L94-L413】
-  Эмитится в: setPerformanceFeeNumeratorChangeDelay() и initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L407-L413】
-* `PoolPauseStatusChanged(address pool, bool pausedShares, bool pausedTrading)` — обновление статуса паузы пула и торговли.【F:contracts/PoolFactory.sol†L96-L523】
-  Эмитится в: setPoolsPaused().【F:contracts/PoolFactory.sol†L510-L523】
+FundCreated(address fundAddress, bool isPoolPrivate, string fundName, string managerName, address manager, uint256 time, uint256 performanceFeeNumerator, uint256 managerFeeNumerator, uint256 managerFeeDenominator) — фиксирует запуск нового пула и его исходные параметры.【F:contracts/PoolFactory.sol†L56-L243】
+Эмитится в — createFund().【F:contracts/PoolFactory.sol†L184-L244】
+
+PoolEvent(address poolAddress) — единая точка подписки на события пула через фабрику.【F:contracts/PoolFactory.sol†L68-L595】
+Эмитится в — emitPoolEvent().【F:contracts/PoolFactory.sol†L592-L595】
+
+PoolManagerEvent(address poolManagerAddress) — событие, транслируемое от активного PoolManagerLogic.【F:contracts/PoolFactory.sol†L70-L599】
+Эмитится в — emitPoolManagerEvent().【F:contracts/PoolFactory.sol†L597-L599】
+
+DAOAddressSet(address daoAddress) — обновление daoAddress и feeRecipient пулами.【F:contracts/PoolFactory.sol†L72-L289】
+Эмитится в — setDAOAddress(), initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L274-L289】
+
+GovernanceAddressSet(address governanceAddress) — смена governanceAddress для guard-проверок.【F:contracts/PoolFactory.sol†L74-L306】
+Эмитится в — setGovernanceAddress(), initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L292-L306】
+
+DaoFeeSet(uint256 numerator, uint256 denominator) — изменение доли комиссий feeRecipient.【F:contracts/PoolFactory.sol†L76-L322】
+Эмитится в — setDaoFee(), initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L308-L322】
+
+ExitCooldownSet(uint256 cooldown) — новое значение exit cooldown для всех пулов.【F:contracts/PoolFactory.sol†L78-L425】
+Эмитится в — setExitCooldown(), initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L415-L425】
+
+MaximumSupportedAssetCountSet(uint256 count) — новый предел активов в whitelist пула.【F:contracts/PoolFactory.sol†L80-L445】
+Эмитится в — setMaximumSupportedAssetCount(), initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L433-L445】
+
+SetMaximumFee(uint256 performanceFeeNumerator, uint256 managerFeeNumerator, uint256 entryFeeNumerator, uint256 exitFeeNumerator, uint256 denominator) — обновлённые лимиты комиссий для всех пулов.【F:contracts/PoolFactory.sol†L82-L396】
+Эмитится в — setMaximumFee(), initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L349-L397】
+
+SetMaximumPerformanceFeeNumeratorChange(uint256 amount) — новая планка шага повышения performance fee.【F:contracts/PoolFactory.sol†L90-L405】
+Эмитится в — setMaximumPerformanceFeeNumeratorChange(), initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L399-L405】
+
+SetPerformanceFeeNumeratorChangeDelay(uint256 delay) — обновлённая задержка перед повышением комиссий.【F:contracts/PoolFactory.sol†L94-L413】
+Эмитится в — setPerformanceFeeNumeratorChangeDelay(), initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L407-L413】
+
+SetAssetHandler(address assetHandler) — новое значение AssetHandler для whitelist активов.【F:contracts/PoolFactory.sol†L92-L492】
+Эмитится в — setAssetHandler(), initialize().【F:contracts/PoolFactory.sol†L146-L170】【F:contracts/PoolFactory.sol†L480-L492】
+
+PoolPauseStatusChanged(address pool, bool pausedShares, bool pausedTrading) — фиксация паузы депозита и торговли конкретного пула.【F:contracts/PoolFactory.sol†L96-L523】
+Эмитится в — setPoolsPaused().【F:contracts/PoolFactory.sol†L510-L523】
+
+ProxyCreated(address proxy) — появление нового прокси PoolLogic или PoolManagerLogic при деплое.【F:contracts/upgradability/ProxyFactory.sol†L27-L82】
+Эмитится в — deploy() внутри createFund().【F:contracts/PoolFactory.sol†L214-L227】【F:contracts/upgradability/ProxyFactory.sol†L73-L82】
 
 ## Безопасность и контроль доступа
-poolFactoryOwner может централизованно менять лимиты комиссий, whitelist активов, паузы, адрес feeRecipient и governanceAddress, что даёт полный контроль протокола.【F:contracts/PoolFactory.sol†L246-L523】
-createFund регистрирует новый пул и подключает его к системе guard через setPoolManagerLogic и реестр isPool, что предотвращает несанкционированные execTransaction вне фабрики.【F:contracts/PoolFactory.sol†L214-L233】
-PoolLogic и PoolManagerLogic читают глобальные параметры из фабрики при проверке пауз, кулдаунов, лимитов комиссий и daoFee, поэтому сбой или компрометация фабрики влияет на все пулы.【F:contracts/PoolFactory.sol†L98-L523】
-investor не может обойти глобальные флаги паузы, потому что PoolLogic проверяет pausedPools, tradingPausedPools и глобальную паузу перед депозитом, выводом и торговлей.【F:contracts/PoolFactory.sol†L139-L523】
+poolFactoryOwner управляет лимитами комиссий, daoAddress, governanceAddress, whitelist активов, exit cooldown и паузами, поэтому это центральный рычаг контроля протокола.【F:contracts/PoolFactory.sol†L246-L523】
+poolManager и trader выполняют транзакции только через PoolLogic, который читает pausedPools, tradingPausedPools, лимиты комиссий и daoFee из фабрики, поэтому poolFactoryOwner косвенно контролирует торговлю и комиссии каждого пула.【F:contracts/PoolFactory.sol†L98-L543】【F:contracts/PoolLogic.sol†L159-L361】
+investor не может обойти паузы или кулдауны, потому что PoolLogic проверяет глобальные параметры фабрики перед депозитом и выводом.【F:contracts/PoolFactory.sol†L139-L523】【F:contracts/PoolLogic.sol†L236-L517】
+Назначенные через governanceAddress guard-адреса ограничивают допустимые активы и транзакции пула, блокируя несанкционированные действия poolManager или trader.【F:contracts/PoolFactory.sol†L292-L543】【F:contracts/PoolLogic.sol†L604-L672】
