@@ -1,113 +1,135 @@
 # EasySwapperV2
 
-Контракт обрабатывает выводы инвесторов из пулов и разворачивает сложные активы в отдельные WithdrawalVault. Выполняет свопы через внешний swapper, чтобы выдать один целевой токен с проверкой ожиданий по количеству. Поддерживает интересы investor и poolManager, но easySwapperOwner контролирует whitelists и точки интеграции, а authorizedWithdrawer завершает операции.
+Контракт управляет депозитами и выводами инвесторов, создаёт WithdrawalVault и использует внешний swapper.
 
 ## Состояние
-* `swapper (address)` — адрес внешнего агрегатора свопов, через него проходят продажи активов из WithdrawalVault.  Кто может менять — easySwapperOwner через setSwapper().【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L45-L462】
-* `wrappedNativeToken (address)` — обёрнутый нативный токен, который принимается при депозитах и выводах.  Кто может менять — устанавливается в initialize() и далее не меняется.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L47-L123】
-* `customCooldown (uint256)` — сокращённый кулдаун для депозитов, позволяющий быстрее выводить средства после zaps.  Кто может менять — easySwapperOwner через setCustomCooldown() и initialize().【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L50-L505】
-* `withdrawalContracts (mapping(address => address))` — хранилище WithdrawalVault для стандартных выводов инвестора.  Кто может менять — создаётся автоматически в _deployVault() при initWithdrawal().【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L53-L521】
-* `customCooldownDepositsWhitelist (mapping(address => bool))` — список пулов, которым разрешён сниженный кулдаун депозитов.  Кто может менять — easySwapperOwner через setCustomCooldownWhitelist().【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L56-L456】
-* `dHedgePoolFactory (address)` — ссылка на PoolFactory для проверки пула и цен.  Кто может менять — easySwapperOwner через setdHedgePoolFactory().【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L59-L477】
-* `isAuthorizedWithdrawer (mapping(address => bool))` — список адресов authorizedWithdrawer, которые могут завершать лимитные выводы.  Кто может менять — easySwapperOwner через setAuthorizedWithdrawers().【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L61-L485】
-* `limitOrderContracts (mapping(address => address))` — WithdrawalVault для лимитных выводов, управляется вместе с limit orders.  Кто может менять — создаётся автоматически в _deployVault() и initLimitOrderWithdrawalFor().【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L64-L520】
-* `карта разрешённых пулов` — не найдено в коде.
-* `feeNumerator/feeDenominator` — не найдено в коде.
-* `feeSink / feeRecipient` — не найдено в коде.
-* `manager fee bypass` — не найдено в коде.
-* `лимиты проскальзывания и маршрутов свопа` — не найдено в коде.
+- `swapper (address)` — внешний агрегатор свопов. Меняет easySwapperOwner через `setSwapper()`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L45-L498】
+- `wrappedNativeToken (address)` — токен для обёртки нативных депозитов. Задаётся в `initialize()` и неизменен.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L107-L120】
+- `customCooldown (uint256)` — пониженный кулдаун для whitelisted пулов. Настраивает easySwapperOwner через `setCustomCooldown()` и `initialize()`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L51-L505】
+- `withdrawalContracts (mapping(address => address))` — WithdrawalVault для стандартных выводов инвесторов. Обновляется в `_deployVault()` и `_initWithdrawalFor()`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L53-L520】
+- `customCooldownDepositsWhitelist (mapping(address => bool))` — пулы с разрешённым `customCooldown`. Управляет easySwapperOwner через `setCustomCooldownWhitelist()`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L56-L456】
+- `dHedgePoolFactory (address)` — адрес фабрики для проверок пулов и активов. Настраивает easySwapperOwner через `setdHedgePoolFactory()`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L59-L477】
+- `isAuthorizedWithdrawer (mapping(address => bool))` — whitelist authorizedWithdrawer. Изменяет easySwapperOwner через `setAuthorizedWithdrawers()`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L61-L485】
+- `limitOrderContracts (mapping(address => address))` — WithdrawalVault для лимитных выводов. Создаётся в `_deployVault()` и `initLimitOrderWithdrawalFor()`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L64-L520】
 
 ## Публичные и external функции
-### Запуск вывода
+### Депозиты
+`nativeDeposit(address _dHedgeVault, uint256 _expectedAmountReceived)`
+- Кто может вызывать — investor.
+- Что делает — заворачивает нативный токен, депонирует в пул и получает долевые токены.
+- Побочные эффекты — вызывает `_nativeDeposit()` с `DEFAULT_COOLDOWN`, увеличивает allowance пула и использует `depositForWithCustomCooldown`.
+- Важные проверки — пул должен быть валиден, проверяется ожидаемое количество долевых токенов и паузы пула.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L238-L240】【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L600-L612】
+
+`nativeDepositWithCustomCooldown(address _dHedgeVault, uint256 _expectedAmountReceived)`
+- Кто может вызывать — investor из `customCooldownDepositsWhitelist`.
+- Что делает — проводит нативный депозит с `customCooldown`.
+- Побочные эффекты — вызывает `_nativeDeposit()` с кастомным кулдауном и обновляет allowance.
+- Важные проверки — модификатор `isCustomCooldownAllowed` проверяет whitelist и параметры entry fee.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L247-L252】【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L88-L95】
+
+### Инициация вывода
 `initWithdrawal(address _dHedgeVault, uint256 _amountIn, IPoolLogic.ComplexAsset[] memory _complexAssetsData)`
-* Кто может вызывать — investor, который держит долевые токены пула.
-* Что делает — переводит долевые токены на контракт, создаёт или повторно использует WithdrawalVault и инициирует withdrawToSafe с раскрытием сложных активов.  Возвращает список активов для отслеживания.
-* Побочные эффекты — создаёт прокси WithdrawalVault при первом вызове, обновляет mapping withdrawalContracts, эмитирует WithdrawalInitiated.
-* Важные require / проверки безопасности — проверяет, что адрес пула признан isdHedgeVault(), и что контракт получил allowance долевых токенов пула.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L260-L360】【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L642-L660】
+- Кто может вызывать — investor.
+- Что делает — передаёт долевые токены контракту, создаёт или использует WithdrawalVault и инициирует `withdrawToSafe`.
+- Побочные эффекты — деплоит vault при первом вызове, записывает его в `withdrawalContracts`, эмитирует `WithdrawalInitiated`.
+- Важные проверки — требует валидный пул, проверяет allowance долевых токенов и параметры сложных активов.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L260-L280】【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L642-L659】
 
 `initLimitOrderWithdrawalFor(address _user, address _dHedgeVault, uint256 _amountIn, IPoolLogic.ComplexAsset[] memory _complexAssetsData)`
-* Кто может вызывать — контракты лимитных ордеров, например PoolLimitOrderManager.
-* Что делает — инициирует вывод для инвестора при исполнении лимитного ордера и запоминает vault в limitOrderContracts.
-* Побочные эффекты — переводит долевые токены пользователя, открывает WithdrawalVault для лимитного режима, заносит инвестора в очередь settlement через события.
-* Важные require / проверки безопасности — требует isdHedgeVault(), проверяет allowance долевых токенов, использует guard-параметры complexAssetsData.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L282-L345】【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L642-L660】
+- Кто может вызывать — контракты лимитных ордеров вроде PoolLimitOrderManager.
+- Что делает — инициирует вывод по лимитному ордеру и сохраняет vault для `_user` в `limitOrderContracts`.
+- Побочные эффекты — переводит долевые токены пользователя, создаёт vault при необходимости, эмитирует `WithdrawalInitiated` и добавляет адрес в очередь settlement.
+- Важные проверки — требует валидный пул, проверяет allowance и соответствие `complexAssetsData` требованиям guard.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L282-L296】【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L642-L660】
 
-### Завершение вывода
+### Завершение вывода инвестора
 `completeWithdrawal(IWithdrawalVault.MultiInSingleOutData calldata _swapData, uint256 _expectedDestTokenAmount)`
-* Кто может вызывать — investor, завершивший первый шаг вывода.
-* Что делает — свопает все активы из WithdrawalVault в один токен по заданным маршрутам и отправляет инвестору.
-* Побочные эффекты — вызывает swapper.swap через vault, очищает записи о токенах, эмитирует WithdrawalCompleted.
-* Важные require / проверки безопасности — проверяет наличие созданного vault и минимальное ожидаемое количество через require в vault.swapToSingleAsset().【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L299-L360】【F:contracts/swappers/easySwapperV2/WithdrawalVault.sol†L47-L109】
+- Кто может вызывать — investor с активным WithdrawalVault.
+- Что делает — свопает активы vault в один токен и отправляет инвестору.
+- Побочные эффекты — обращается к swapper через vault, очищает записи активов, эмитирует `WithdrawalCompleted`.
+- Важные проверки — проверяет существование vault и минимальное количество токена через `swapToSingleAsset`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L303-L309】【F:contracts/swappers/easySwapperV2/WithdrawalVault.sol†L47-L109】
+
+`completeWithdrawal()`
+- Кто может вызывать — investor.
+- Что делает — забирает активы из vault без свопа.
+- Побочные эффекты — вызывает `_claimTokensFromVault`, обновляет хранилище, эмитирует `WithdrawalCompleted`.
+- Важные проверки — удостоверяется, что vault принадлежит инвестору и активы можно вернуть напрямую.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L311-L315】【F:contracts/swappers/easySwapperV2/WithdrawalVault.sol†L110-L157】
+
+### Завершение лимитного вывода
+`completeLimitOrderWithdrawal(IWithdrawalVault.MultiInSingleOutData calldata _swapData, uint256 _expectedDestTokenAmount)`
+- Кто может вызывать — investor с активным лимитным vault.
+- Что делает — свопает активы лимитного vault и отправляет токен инвестору.
+- Побочные эффекты — вызывает swap через vault, эмитирует `WithdrawalCompleted`.
+- Важные проверки — проверяет наличие лимитного vault и минимальный `destTokenAmount`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L321-L326】【F:contracts/swappers/easySwapperV2/WithdrawalVault.sol†L47-L122】
+
+`completeLimitOrderWithdrawal()`
+- Кто может вызывать — investor.
+- Что делает — завершает лимитный вывод без свопа и получает активы напрямую.
+- Побочные эффекты — вызывает `completeLimitOrderWithdrawalFor(msg.sender)`, эмитирует `WithdrawalCompleted`.
+- Важные проверки — делегирует проверки в версию без swap данных и использует `recoverAssets` vault.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L328-L332】【F:contracts/swappers/easySwapperV2/WithdrawalVault.sol†L110-L157】
 
 `completeLimitOrderWithdrawalFor(address _user, IWithdrawalVault.MultiInSingleOutData calldata _swapData, uint256 _expectedDestTokenAmount)`
-* Кто может вызывать — только authorizedWithdrawer из whitelist.
-* Что делает — завершает вывод по лимитному ордеру и переводит конвертированный токен инвестору.
-* Побочные эффекты — вызывает swapper через vault пользователя, эмитирует WithdrawalCompleted.
-* Важные require / проверки безопасности — модификатор onlyAuthorizedWithdrawers проверяет whitelist, vault контролирует минимальное количество токена и принадлежность depositor.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L334-L345】【F:contracts/swappers/easySwapperV2/WithdrawalVault.sol†L47-L122】
+- Кто может вызывать — authorizedWithdrawer.
+- Что делает — завершает лимитный вывод инвестора со свопом и отправляет токен получателю.
+- Побочные эффекты — использует swapper через vault `_user`, эмитирует `WithdrawalCompleted`.
+- Важные проверки — модификатор `onlyAuthorizedWithdrawers` проверяет whitelist, vault контролирует принадлежность и минимальный `destTokenAmount`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L339-L345】【F:contracts/swappers/easySwapperV2/WithdrawalVault.sol†L47-L122】
 
 `completeLimitOrderWithdrawalFor(address _user)`
-* Кто может вызывать — любой адрес.
-* Что делает — переводит все активы из лимитного WithdrawalVault пользователю без свопа.
-* Побочные эффекты — очищает vault и эмитирует WithdrawalCompleted.
-* Важные require / проверки безопасности — проверяет наличие vault и принадлежность depositor, операции происходят внутри recoverAssets().【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L347-L360】【F:contracts/swappers/easySwapperV2/WithdrawalVault.sol†L110-L157】
+- Кто может вызывать — любой адрес.
+- Что делает — переводит активы из лимитного vault пользователю без свопа.
+- Побочные эффекты — вызывает `_claimTokensFromVault` для лимитного режима, эмитирует `WithdrawalCompleted`.
+- Важные проверки — проверяет наличие vault и совпадение depositor в `recoverAssets()`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L347-L351】【F:contracts/swappers/easySwapperV2/WithdrawalVault.sol†L110-L157】
 
-### Настройки владельца
+### Дополнительные функции
+`partialWithdraw(uint256 _portion, address _to)`
+- Кто может вызывать — пул через PoolLogic.
+- Что делает — выдаёт долю активов vault пулу в процессе `withdrawProcessing`.
+- Побочные эффекты — вызывает `recoverAssets` в vault, эмитирует `WithdrawalCompleted`.
+- Важные проверки — проверяет диапазон `_portion` и использует vault вызывающего пула.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L353-L360】
+
+`unrollAndClaim(address _dHedgeVault, uint256 _amountIn, IPoolLogic.ComplexAsset[] memory _complexAssetsData)`
+- Кто может вызывать — investor.
+- Что делает — выполняет вывод без свопа в один шаг через `initWithdrawal` и прямой `recoverAssets`.
+- Побочные эффекты — создаёт или переиспользует vault, вызывает `recoverAssets`, эмитирует `WithdrawalCompleted`.
+- Важные проверки — наследует проверки `initWithdrawal` и требует доступ к активам vault.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L363-L383】
+
+### Настройки easySwapperOwner
 `setCustomCooldownWhitelist(WhitelistSetting[] calldata _whitelistSettings)`
-* Кто может вызывать — только easySwapperOwner.
-* Что делает — включает или выключает пониженный кулдаун депозитов для выбранных пулов.
-* Побочные эффекты — обновляет mapping customCooldownDepositsWhitelist, проверяет, что адрес является валидным пулом.
-* Важные require / проверки безопасности — require(isdHedgeVault()), защита от нулевых адресов через проверку пула.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L449-L456】
+- Кто может вызывать — easySwapperOwner.
+- Что делает — включает или отключает `customCooldown` для пулов.
+- Побочные эффекты — обновляет `customCooldownDepositsWhitelist`.
+- Важные проверки — проверяет, что адреса являются dHEDGE пулами через `isdHedgeVault()`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L449-L456】
 
 `setSwapper(ISwapper _swapper)`
-* Кто может вызывать — только easySwapperOwner.
-* Что делает — назначает внешний агрегатор свопов.
-* Побочные эффекты — обновляет адрес swapper.
-* Важные require / проверки безопасности — запрещает нулевой адрес.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L459-L498】
+- Кто может вызывать — easySwapperOwner.
+- Что делает — назначает новый swapper.
+- Побочные эффекты — обновляет адрес `swapper`.
+- Важные проверки — запрещает нулевой адрес во внутреннем `_setSwapper`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L459-L498】
 
 `setCustomCooldown(uint256 _customCooldown)`
-* Кто может вызывать — только easySwapperOwner.
-* Что делает — задаёт новый сокращённый кулдаун депозитов.
-* Побочные эффекты — обновляет customCooldown.
-* Важные require / проверки безопасности — диапазон от 5 минут до DEFAULT_COOLDOWN проверяется в internal setter.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L465-L505】
+- Кто может вызывать — easySwapperOwner.
+- Что делает — устанавливает значение `customCooldown`.
+- Побочные эффекты — обновляет переменную для будущих депозитов.
+- Важные проверки — диапазон от 5 минут до `DEFAULT_COOLDOWN` проверяется в `_setCustomCooldown`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L465-L505】
 
 `setdHedgePoolFactory(address _dHedgePoolFactory)`
-* Кто может вызывать — только easySwapperOwner.
-* Что делает — указывает актуальный PoolFactory для проверок.
-* Побочные эффекты — обновляет dHedgePoolFactory.
-* Важные require / проверки безопасности — запрещён нулевой адрес.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L471-L477】
+- Кто может вызывать — easySwapperOwner.
+- Что делает — задаёт адрес фабрики пулов.
+- Побочные эффекты — обновляет `dHedgePoolFactory`.
+- Важные проверки — запрещён нулевой адрес.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L471-L477】
 
 `setAuthorizedWithdrawers(WhitelistSetting[] calldata _whitelistSettings)`
-* Кто может вызывать — только easySwapperOwner.
-* Что делает — выдаёт или отзывает роль authorizedWithdrawer.
-* Побочные эффекты — обновляет mapping isAuthorizedWithdrawer, эмитирует AuthorizedWithdrawersSet.
-* Важные require / проверки безопасности — ограничено владельцем, проверок адресов нет кроме прав владельца.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L479-L485】
-
-`salvage(address token, uint256 amount)`
-* Кто может вызывать — не найдено в коде.
-* Что делает — не найдено в коде.
-* Побочные эффекты — не найдено в коде.
-* Важные require / проверки безопасности — не найдено в коде.
-
-`setPoolAllowed(address pool, bool allowed)`
-* Кто может вызывать — не найдено в коде.
-* Что делает — не найдено в коде.
-* Побочные эффекты — не найдено в коде.
-* Важные require / проверки безопасности — не найдено в коде.
-
-`setFee(...) / setFeeSink(...) / setManagerFeeBypass(...)`
-* Кто может вызывать — не найдено в коде.
-* Что делает — не найдено в коде.
-* Побочные эффекты — не найдено в коде.
-* Важные require / проверки безопасности — не найдено в коде.
+- Кто может вызывать — easySwapperOwner.
+- Что делает — выдаёт или отзывает роль authorizedWithdrawer.
+- Побочные эффекты — обновляет `isAuthorizedWithdrawer` и эмитирует событие.
+- Важные проверки — ограничено правами easySwapperOwner, дополнительных проверок адресов нет.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L479-L485】
 
 ## Events
-* `ZapDepositCompleted(address depositor, address dHedgeVault, IERC20 vaultDepositToken, IERC20 userDepositToken, uint256 amountReceived, uint256 lockupTime)` — завершение депозита через swapper и запись полученного количества.  Эмитится в: _zapDeposit().【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L586-L594】
-* `WithdrawalInitiated(address withdrawalVault, address depositor, address dHedgeVault, uint256 amountWithdrawn)` — запуск вывода и создание WithdrawalVault.  Эмитится в: _initWithdrawalFor().【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L642-L660】
-* `WithdrawalCompleted(address withdrawalVault, address depositor)` — завершение вывода и выдача активов или токена.  Эмитится в: _completeWithdrawal(), _claimTokensFromVault(), partialWithdraw(), unrollAndClaim().【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L299-L383】
-* `WithdrawalVaultCreated(address withdrawalVault, address depositor)` — развёртывание стандартного WithdrawalVault.  Эмитится в: _deployVault().【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L507-L521】
-* `LimitOrderVaultCreated(address limitOrderVault, address depositor)` — развёртывание WithdrawalVault для лимитного вывода.  Эмитится в: _deployVault().【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L507-L520】
-* `AuthorizedWithdrawersSet(WhitelistSetting[] whitelistSettings)` — обновление списка authorizedWithdrawer.  Эмитится в: setAuthorizedWithdrawers().【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L479-L485】
+- `ZapDepositCompleted(address depositor, address dHedgeVault, IERC20 vaultDepositToken, IERC20 userDepositToken, uint256 amountReceived, uint256 lockupTime)` — завершение депозита через swapper. Эмитится в — `_zapDeposit()`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L67-L74】【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L560-L594】
+- `WithdrawalInitiated(address withdrawalVault, address depositor, address dHedgeVault, uint256 amountWithdrawn)` — старт вывода и фиксация vault. Эмитится в — `_initWithdrawalFor()`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L75-L688】
+- `WithdrawalCompleted(address withdrawalVault, address depositor)` — завершение вывода и выдача активов. Эмитится в — `_completeWithdrawal()`, `_claimTokensFromVault()`, `partialWithdraw()`, `unrollAndClaim()`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L303-L383】
+- `WithdrawalVaultCreated(address withdrawalVault, address depositor)` — развёртывание vault для стандартного вывода. Эмитится в — `_deployVault()`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L507-L516】
+- `LimitOrderVaultCreated(address limitOrderVault, address depositor)` — развёртывание vault для лимитного вывода. Эмитится в — `_deployVault()`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L507-L520】
+- `AuthorizedWithdrawersSet(WhitelistSetting[] whitelistSettings)` — обновление списка authorizedWithdrawer. Эмитится в — `setAuthorizedWithdrawers()`.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L479-L485】
 
 ## Безопасность и контроль доступа
-easySwapperOwner управляет swapper, whitelist пулов с пониженным кулдауном и адреса PoolFactory, поэтому контролирует инфраструктуру и может косвенно влиять на обработку активов, но не может напрямую забирать средства без дополнительных функций salvage.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L449-L485】
-authorizedWithdrawer может инициировать перевод активов из WithdrawalVault инвестору, однако не может менять настройки swapper, whitelist или кулдаунов.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L334-L485】
-investor запускает и завершает вывод, но не имеет прав менять комиссии или whitelists и должен доверять easySwapperOwner и authorizedWithdrawer в части корректности маршрутов. Контроль за проскальзыванием осуществляется через `_expectedDestTokenAmount`, который передаётся в каждую операцию завершения.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L299-L360】
+- easySwapperOwner управляет swapper, `customCooldown`, whitelist пулов и адресом фабрики, влияя на инфраструктуру, но не получая прямого доступа к активам без операций WithdrawalVault.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L449-L505】
+- authorizedWithdrawer завершает лимитные выводы через `completeLimitOrderWithdrawalFor`, не имея прав менять настройки и полагаясь на ограничения vault.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L339-L485】
+- investor инициирует и завершает выводы, указывает `_expectedDestTokenAmount` для защиты от проскальзывания и может выбирать прямой вывод без свопа, оставаясь зависимым от настроек easySwapperOwner и swapper.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L260-L333】

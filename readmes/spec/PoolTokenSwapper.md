@@ -1,73 +1,80 @@
 # PoolTokenSwapper
 
-Контракт исполняет свопы между активами и пулами от имени dHEDGE пулов по заранее одобренным маршрутам. Работает как вспомогательный модуль для poolManager и swapWhitelist, удерживая токены временно во время обмена. Обслуживает интересы poolManager и investor, но poolTokenSwapperOwner управляет whitelists, комиссиями и может извлечь средства при salvage.
+Контракт выполняет обмены между пул токенами и базовыми активами dHEDGE, поддерживает whitelist маршрутов и позволяет poolManager вызывать разрешённые транзакции.
 
 ## Состояние
-* `poolFactory (address)` — фабрика пулов, используется для проверки активов, получения guard адресов и цен.  Кто может менять — poolTokenSwapperOwner через initialize() и косвенно при redeploy, в контракте функции смены нет.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L52-L336】
-* `poolLogic (address)` — псевдоним для совместимости с guard, хранит адрес самого контракта.  Кто может менять — задаётся один раз в initialize().【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L53-L96】
-* `manager (address)` — адрес исполнителя, который может вызывать execTransaction и управлять внешними протоколами.  Кто может менять — poolTokenSwapperOwner через setManager() и initialize().【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L54-L295】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L458-L461】
-* `assetConfiguration (mapping(address => bool))` — whitelist активов, доступных для обмена.  Кто может менять — poolTokenSwapperOwner через setAssets() и initialize().【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L56-L280】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L442-L447】
-* `poolConfiguration (mapping(address => PoolData))` — разрешённые пулы с их swap fee и статусом включено/выключено.  Кто может менять — poolTokenSwapperOwner через setPools() и initialize().【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L57-L288】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L450-L456】
-* `swapWhitelist (mapping(address => bool))` — список адресов, которым разрешено инициировать swap().  Кто может менять — poolTokenSwapperOwner через setSwapWhitelist() и initialize().【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L58-L301】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L463-L467】
-* `FEE_DENOMINATOR (uint256)` — знаменатель для расчёта комиссий пула.  Кто может менять — константа 10_000, изменить нельзя.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L60-L61】
+- `poolFactory (address)` — фабрика dHEDGE для проверок guard и цен. Устанавливается в `initialize()` и используется во всех проверках активов и пулов. 【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L74-L95】
+- `poolLogic (address)` — псевдоадрес пула для guard совместимости, фиксируется как адрес контракта при `initialize()`.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L74-L95】
+- `manager (address)` — адрес poolManager, которому разрешён `execTransaction`. Задаётся в `initialize()` и обновляется `setManager()`.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L74-L95】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L290-L295】
+- `assetConfiguration (mapping(address => bool))` — whitelist поддерживаемых активов. Обновляется `_setAssets()` при `initialize()` и `setAssets()`.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L56-L280】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L442-L447】
+- `poolConfiguration (mapping(address => PoolData))` — параметры разрешённых пулов с флагом и swap fee. Настраивается `_setPools()` из `initialize()` и `setPools()`.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L57-L288】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L450-L455】
+- `swapWhitelist (mapping(address => bool))` — список адресов, которым разрешено вызывать `swap`. Заполняется `_setSwapWhitelist()` из `initialize()` и `setSwapWhitelist()`.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L58-L302】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L463-L466】
+- `FEE_DENOMINATOR (uint256)` — база 10_000 для расчёта swap fee. Используется в `_getSwapFee()` и проверках минимального выхода. 【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L60-L61】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L469-L472】
 
 ## Публичные и external функции
-### Свопы
+### Инициализация
+`initialize(address _factory, address _manager, AssetConfig[] calldata _assetConfigs, PoolConfig[] calldata _poolConfigs, SwapWhitelistConfig[] calldata _swapWhitelist)`
+- Кто может вызывать — однократно poolTokenSwapperOwner при развёртывании прокси.
+- Что делает — задаёт фабрику, менеджера, whitelist активов/пулов и список разрешённых отправителей для `swap`.
+- Побочные эффекты — инициализирует upgradable базовые контракты, настраивает все маппинги и роль manager.
+- Важные проверки — требует валидные активы и пулы через `_setAssets`/`_setPools`, проверяет ненулевой `_manager`.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L74-L95】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L442-L461】
+
+### Обмены
 `swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut)`
-* Кто может вызывать — только адрес из swapWhitelist.
-* Что делает — определяет тип обмена (asset→pool, pool→asset, pool→pool), рассчитывает котировку и вызывает внутренние функции обмена.
-* Побочные эффекты — переводит токены между пользователем и контрактом, эмитирует Swap, удерживает swap fee через poolConfiguration.
-* Важные require / проверки безопасности — требует, чтобы участвующие активы/пулы были whitelisted, проверяет minAmountOut и вызывает internal quote с контролем fee. Также контракт находится под whenNotPaused и nonReentrant.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L98-L226】
+- Кто может вызывать — адрес из `swapWhitelist` при активном контракте (не paused).
+- Что делает — определяет тип маршрута (asset↔pool) и вызывает соответствующий внутренний swap.
+- Побочные эффекты — переводит токены между пользователем и контрактом, эмитирует `Swap`.
+- Важные проверки — проверяет whitelist, статус пула/актива и требуемый `minAmountOut` в внутренних функциях `swap*`.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L130-L225】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L171-L225】
 
-### Управление пулом и протоколами
+### Управление транзакциями пула
 `execTransaction(address to, bytes calldata data)`
-* Кто может вызывать — только manager, назначенный владельцем.
-* Что делает — позволяет менеджеру вызвать whitelisted внешний протокол или пул, используя guard проверки dHEDGE.
-* Побочные эффекты — исполняет произвольный call, может переводить активы, эмитирует TokenSwapperTransactionExecuted.
-* Важные require / проверки безопасности — проверяет whenNotPaused, nonReentrant, требует txGuard > 0, запрещает нулевой адрес и использует AddressHelper.tryAssemblyCall для безопасного вызова.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L228-L272】
+- Кто может вызывать — poolManager, сохранённый в `manager`.
+- Что делает — выполняет whitelisted внешнюю транзакцию от имени контракта (допустимые контракты/активы). 
+- Побочные эффекты — делает внешний вызов через `tryAssemblyCall`, эмитирует `TokenSwapperTransactionExecuted`.
+- Важные проверки — требует ненулевой `to`, получает разрешение от guard фабрики, проверяет тип транзакции и успех вызова. 【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L230-L272】
 
-### Настройки владельца
+### Настройки poolTokenSwapperOwner
 `setAssets(AssetConfig[] calldata _assetConfigs)`
-* Кто может вызывать — только poolTokenSwapperOwner.
-* Что делает — включает или отключает активы для обменов.
-* Побочные эффекты — обновляет assetConfiguration, проверяет актив через factory.isValidAsset().
-* Важные require / проверки безопасности — запрещает указывать пул как актив, использует валидацию IFactory.isValidAsset().【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L274-L447】
+- Кто может вызывать — poolTokenSwapperOwner.
+- Что делает — обновляет whitelist активов и их статус.
+- Побочные эффекты — вызывает `_setAssets`, включая/отключая активы.
+- Важные проверки — каждое значение должно быть валидным активом фабрики и не может быть пулом.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L276-L280】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L442-L447】
 
 `setPools(PoolConfig[] calldata _poolConfigs)`
-* Кто может вызывать — только poolTokenSwapperOwner.
-* Что делает — настраивает список разрешённых пулов и их swap fee.
-* Побочные эффекты — обновляет poolConfiguration, устанавливает флаг включения и размер комиссии.
-* Важные require / проверки безопасности — проверяет, что адрес является пулом через factory.isPool(), хранит fee в PoolData.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L283-L456】
+- Кто может вызывать — poolTokenSwapperOwner.
+- Что делает — задаёт доступные пулы и их swap fee.
+- Побочные эффекты — обновляет `poolConfiguration` через `_setPools`.
+- Важные проверки — адрес должен быть зарегистрированным пулом фабрики; swap fee записывается без дополнительных ограничений, но применяется в `_getSwapFee`.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L283-L288】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L450-L455】
 
 `setManager(address _manager)`
-* Кто может вызывать — только poolTokenSwapperOwner.
-* Что делает — назначает нового manager для execTransaction.
-* Побочные эффекты — обновляет manager.
-* Важные require / проверки безопасности — запрещает нулевой адрес в _setManager().【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L290-L295】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L458-L461】
+- Кто может вызывать — poolTokenSwapperOwner.
+- Что делает — переназначает poolManager для `execTransaction`.
+- Побочные эффекты — вызывает `_setManager`, обновляя адрес и проверяя валидность.
+- Важные проверки — запрещён нулевой адрес. 【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L290-L295】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L458-L461】
 
 `setSwapWhitelist(SwapWhitelistConfig[] calldata _swapWhitelist)`
-* Кто может вызывать — только poolTokenSwapperOwner.
-* Что делает — добавляет или удаляет адреса, которые могут звать swap().
-* Побочные эффекты — обновляет mapping swapWhitelist.
-* Важные require / проверки безопасности — только права владельца, дополнительные проверки отсутствуют.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L297-L302】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L463-L467】
+- Кто может вызывать — poolTokenSwapperOwner.
+- Что делает — включает или выключает адреса, которым разрешён `swap`.
+- Побочные эффекты — обновляет `swapWhitelist` через `_setSwapWhitelist`.
+- Важные проверки — список может содержать любые адреса; хранение напрямую перезаписывается. 【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L297-L302】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L463-L466】
 
 `salvage(IERC20Upgradeable _token, uint256 _amount)`
-* Кто может вызывать — только poolTokenSwapperOwner.
-* Что делает — выводит указанный ERC20 токен, который остался на контракте.
-* Побочные эффекты — переводит `_amount` токена владельцу.
-* Важные require / проверки безопасности — никаких дополнительных проверок; ответственность несёт владелец.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L304-L310】
+- Кто может вызывать — poolTokenSwapperOwner.
+- Что делает — выводит произвольный токен с контракта владельцу.
+- Побочные эффекты — переводит `_amount` указанного токена на адрес владельца.
+- Важные проверки — полагается на SafeERC20; дополнительных ограничений нет. 【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L304-L310】
 
 `pause()` / `unpause()`
-* Кто может вызывать — только poolTokenSwapperOwner.
-* Что делает — глобально останавливает или возобновляет swap и execTransaction.
-* Побочные эффекты — обновляет состояние паузы PausableUpgradeable.
-* Важные require / проверки безопасности — защищено onlyOwner, применяется модификатор whenNotPaused к операциям.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L312-L321】
+- Кто может вызывать — poolTokenSwapperOwner.
+- Что делает — приостанавливает или возобновляет `swap` и `execTransaction`.
+- Побочные эффекты — включает/выключает Pausable флаг.
+- Важные проверки — нет дополнительных проверок, используется модификатор onlyOwner. 【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L312-L322】
 
 ## Events
-* `TokenSwapperTransactionExecuted(address swapper, address manager, uint16 transactionType)` — зафиксирован вызов execTransaction с определённым типом транзакции.  Эмитится в: execTransaction().【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L63-L272】
-* `Swap(address user, address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOut)` — выполнен обмен между активами или пулами.  Эмитится в: swapAssetToPool(), swapPoolToAsset(), swapPoolToPool().【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L66-L226】
+- `TokenSwapperTransactionExecuted(address swapper, address manager, uint16 transactionType)` — фиксация выполнения транзакции менеджера. Эмитится в — `execTransaction()`.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L63-L272】
+- `Swap(address user, address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOut)` — успешный обмен пользователя. Эмитится в — `swapAssetToPool()`, `swapPoolToAsset()`, `swapPoolToPool()`.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L66-L225】
 
 ## Безопасность и контроль доступа
-swapWhitelist может передавать активы через swap(), но ограничен списком активов и пулов, заданных owner, а каждая операция проверяет минимальное количество и удерживает комиссию согласно PoolData.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L98-L226】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L377-L438】
-poolTokenSwapperOwner управляет whitelists, swap fee, менеджером и может вызвать salvage, что даёт технический контроль над активами, временно находящимися на контракте.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L274-L310】
-investor напрямую не взаимодействует с контрактом и не может инициировать произвольные свопы, полагаясь на manager и swapWhitelist для соблюдения политики пула.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L98-L302】
+- poolTokenSwapperOwner управляет whitelist активов, пулов, swap отправителей и адресом poolManager, а также может паузить контракт и извлекать лишние токены.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L74-L322】
+- swapWhitelist участники могут вызывать только `swap`, причём маршруты ограничены разрешёнными активами/пулами и минимальным ожидаемым количеством. 【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L130-L225】
+- poolManager (manager) может вызывать `execTransaction`, но каждый вызов проходит через guard фабрики и может касаться только поддерживаемых адресов. 【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L230-L272】
