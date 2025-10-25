@@ -19,7 +19,7 @@ poolManager и trader исполняют сделки через execTransaction
 * `lastDeposit (mapping(address => uint256))` — время последнего депозита адреса для расчёта кулдауна на вывод.
   Кто может менять — автоматически в _depositFor() для получателя токенов.【F:contracts/PoolLogic.sol†L149-L333】
 * `poolManagerLogic (address)` — активный контракт PoolManagerLogic, задающий whitelist активов, комиссии и доступ к ролям.
-  Кто может менять — только poolFactoryOwner через setPoolManagerLogic().【F:contracts/PoolLogic.sol†L151-L887】
+  Кто может менять — только factory или poolFactoryOwner через setPoolManagerLogic().【F:contracts/PoolLogic.sol†L151-L887】
 * `lastWhitelistTransfer (mapping(address => uint256))` — зарезервированное хранилище для будущих ограничений transfer. Сейчас не используется и не обновляется после объявления.
   Кто может менять — нет активных обновлений в текущей версии.【F:contracts/PoolLogic.sol†L153-L209】
 * `lastFeeMintTime (uint256)` — время последнего успешного стримингового начисления management fee.
