@@ -1,133 +1,133 @@
 # Роли и полномочия dHEDGE
 
-#### owner (PoolFactory)
+#### poolFactoryOwner
 
 * Права по управлению активами пула
-  `PoolManagerLogic.changeAssets()` — owner фабрики может напрямую добавлять и удалять поддерживаемые активы пула через вызов, обходя менеджера.【F:contracts/PoolManagerLogic.sol†L148-L179】
-  `PoolLogic.setPoolManagerLogic()` — owner или сама фабрика могут переназначить активный PoolManagerLogic, что меняет весь код управления активами.【F:contracts/PoolLogic.sol†L879-L887】
-  `PoolFactory.setPoolsPaused()` — owner может остановить переводы долей и торговлю во всех выбранных пулах.【F:contracts/PoolFactory.sol†L510-L524】
+  `PoolManagerLogic.changeAssets()` — poolFactoryOwner может напрямую добавлять и удалять поддерживаемые активы пула через вызов, обходя менеджера.【F:contracts/PoolManagerLogic.sol†L148-L179】
+  `PoolLogic.setPoolManagerLogic()` — poolFactoryOwner или сама фабрика могут переназначить активный PoolManagerLogic, что меняет весь код управления активами.【F:contracts/PoolLogic.sol†L879-L887】
+  `PoolFactory.setPoolsPaused()` — poolFactoryOwner может остановить переводы долей и торговлю во всех выбранных пулах.【F:contracts/PoolFactory.sol†L510-L524】
 
 * Права по настройкам протокола
-  `PoolFactory.addCustomCooldownWhitelist()` / `removeCustomCooldownWhitelist()` — управляет адресами с правом ставить кастомный кулдаун на депозиты.【F:contracts/PoolFactory.sol†L246-L258】
-  `PoolFactory.addReceiverWhitelist()` / `removeReceiverWhitelist()` — контролирует, кто может получать токены во время кулдауна.【F:contracts/PoolFactory.sol†L260-L272】
-  `PoolFactory.setDAOAddress()` и `setGovernanceAddress()` — переназначает DAO и Governance адреса.【F:contracts/PoolFactory.sol†L276-L306】
-  `PoolFactory.setDaoFee()` — задаёт долю комиссий DAO.【F:contracts/PoolFactory.sol†L308-L322】
-  `PoolFactory.setMaximumFee()` и `setMaximumPerformanceFeeNumeratorChange()` / `setPerformanceFeeNumeratorChangeDelay()` — выставляет глобальные лимиты комиссий и задержку повышения комиссий менеджеров.【F:contracts/PoolFactory.sol†L333-L414】
-  `PoolFactory.setExitCooldown()` — меняет глобальный кулдаун на вывод.【F:contracts/PoolFactory.sol†L415-L431】
-  `PoolFactory.setMaximumSupportedAssetCount()` и `setAssetHandler()` — задаёт лимит активов и выбирает AssetHandler, влияя на whitelist активов.【F:contracts/PoolFactory.sol†L433-L492】
-  `PoolFactory.pause()` / `unpause()` — глобально ставит на паузу депозиты, выводы и торговлю.【F:contracts/PoolFactory.sol†L494-L507】
+  `PoolFactory.addCustomCooldownWhitelist()` / `removeCustomCooldownWhitelist()` — poolFactoryOwner управляет адресами с правом ставить кастомный кулдаун на депозиты.【F:contracts/PoolFactory.sol†L246-L258】
+  `PoolFactory.addReceiverWhitelist()` / `removeReceiverWhitelist()` — poolFactoryOwner контролирует, кто может получать токены во время кулдауна.【F:contracts/PoolFactory.sol†L260-L272】
+  `PoolFactory.setDAOAddress()` и `setGovernanceAddress()` — poolFactoryOwner переназначает DAO и Governance адреса.【F:contracts/PoolFactory.sol†L276-L306】
+  `PoolFactory.setDaoFee()` — poolFactoryOwner задаёт долю комиссий DAO.【F:contracts/PoolFactory.sol†L308-L322】
+  `PoolFactory.setMaximumFee()` и `setMaximumPerformanceFeeNumeratorChange()` / `setPerformanceFeeNumeratorChangeDelay()` — poolFactoryOwner выставляет глобальные лимиты комиссий и задержку повышения комиссий менеджеров.【F:contracts/PoolFactory.sol†L333-L414】
+  `PoolFactory.setExitCooldown()` — poolFactoryOwner меняет глобальный кулдаун на вывод.【F:contracts/PoolFactory.sol†L415-L431】
+  `PoolFactory.setMaximumSupportedAssetCount()` и `setAssetHandler()` — poolFactoryOwner задаёт лимит активов и выбирает AssetHandler, влияя на whitelist активов.【F:contracts/PoolFactory.sol†L433-L492】
+  `PoolFactory.pause()` / `unpause()` — poolFactoryOwner глобально ставит на паузу депозиты, выводы и торговлю.【F:contracts/PoolFactory.sol†L494-L507】
 
 * Доступ к деньгам пользователей
   1. Прямого вывода активов из пула не найдено в коде.
-  2. Может назначить daoAddress и governanceAddress, которые участвуют в распределении комиссий и guard логике.【F:contracts/PoolFactory.sol†L276-L306】
-  3. Может направлять комиссионную эмиссию на любой адрес через `setDAOAddress()` и вызов `PoolLogic.mintManagerFee()`, который минтит доли DAO и менеджеру.【F:contracts/PoolFactory.sol†L276-L322】【F:contracts/PoolLogic.sol†L780-L820】
+  2. poolFactoryOwner может назначить daoAddress и governanceAddress, которые участвуют в распределении комиссий и guard логике.【F:contracts/PoolFactory.sol†L276-L306】
+  3. poolFactoryOwner может направлять комиссионную эмиссию на любой адрес через `setDAOAddress()` и вызов `PoolLogic.mintManagerFee()`, который минтит доли DAO и менеджеру.【F:contracts/PoolFactory.sol†L276-L322】【F:contracts/PoolLogic.sol†L780-L820】
 
 * Жёсткие ограничения
   Любые изменения активов проходят проверки guard-ов и лимитов на стороне PoolManagerLogic (валидный актив, максимум активов, минимум депозитных активов).【F:contracts/PoolManagerLogic.sol†L168-L214】
 
-#### owner (Governance)
+#### governanceOwner
 
 * Права по управлению активами пула
-  `Governance.setContractGuard()` — выбирает guard для внешних протоколов, определяя, куда менеджер может отправлять средства пула.【F:contracts/Governance.sol†L38-L55】
-  `Governance.setAssetGuard()` — назначает asset guard для типов активов, что позволяет или запрещает добавлять актив в пул.【F:contracts/Governance.sol†L57-L74】
+  `Governance.setContractGuard()` — governanceOwner выбирает guard для внешних протоколов, определяя, куда менеджер может отправлять средства пула.【F:contracts/Governance.sol†L38-L55】
+  `Governance.setAssetGuard()` — governanceOwner назначает asset guard для типов активов, что позволяет или запрещает добавлять актив в пул.【F:contracts/Governance.sol†L57-L74】
 
 * Права по настройкам протокола
-  Управление guard-ами фактически задаёт протокольный whitelist стратегий и активов.【F:contracts/Governance.sol†L38-L74】
+  Управление guard-ами governanceOwner фактически задаёт протокольный whitelist стратегий и активов.【F:contracts/Governance.sol†L38-L74】
 
 * Доступ к деньгам пользователей
   1. Прямых функций вывода нет.
-  2. Может назначить guard контракты, которые затем получают доступ к активам через менеджера.【F:contracts/Governance.sol†L38-L74】
+  2. governanceOwner может назначить guard контракты, которые затем получают доступ к активам через менеджера.【F:contracts/Governance.sol†L38-L74】
   3. Минтинг вознаграждений не предусмотрен.
 
 * Жёсткие ограничения
   Требуется указывать ненулевые адреса guard-ов, иначе изменения отклоняются.【F:contracts/Governance.sol†L48-L74】
 
-#### owner (AssetHandler)
+#### assetHandlerOwner
 
 * Права по управлению активами пула
-  `AssetHandler.addAsset()` / `addAssets()` / `removeAsset()` — формирует список валидных активов с прайс-фидами, без которых пул не сможет добавить актив.【F:contracts/priceAggregators/AssetHandler.sol†L110-L146】
+  `AssetHandler.addAsset()` / `addAssets()` / `removeAsset()` — assetHandlerOwner формирует список валидных активов с прайс-фидами, без которых пул не сможет добавить актив.【F:contracts/priceAggregators/AssetHandler.sol†L110-L146】
 
 * Права по настройкам протокола
-  `AssetHandler.setChainlinkTimeout()` — задаёт таймаут прайс-фидов для расчётов пула.【F:contracts/priceAggregators/AssetHandler.sol†L110-L118】
+  `AssetHandler.setChainlinkTimeout()` — assetHandlerOwner задаёт таймаут прайс-фидов для расчётов пула.【F:contracts/priceAggregators/AssetHandler.sol†L110-L118】
 
 * Доступ к деньгам пользователей
   1. Функций вывода нет.
-  2. Может опосредованно разрешать или запрещать активы, что влияет на капитал инвесторов.【F:contracts/priceAggregators/AssetHandler.sol†L118-L146】
+  2. assetHandlerOwner может опосредованно разрешать или запрещать активы, что влияет на капитал инвесторов.【F:contracts/priceAggregators/AssetHandler.sol†L118-L146】
   3. Минтинг не предусмотрен.
 
 * Жёсткие ограничения
   Требуется ненулевой адрес агрегатора и актива, иначе транзакция отклоняется.【F:contracts/priceAggregators/AssetHandler.sol†L121-L135】
 
-#### owner (EasySwapperV2)
+#### easySwapperOwner
 
 * Права по управлению активами пула
-  `EasySwapperV2.setAuthorizedWithdrawers()` — решает, кто завершает выводы через EasySwapper, влияя на выпуск активов из пулов.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L479-L485】
-  `EasySwapperV2.setCustomCooldownWhitelist()` и `setCustomCooldown()` — регулирует возможность депозитов с пониженным кулдауном, влияя на ликвидность пулов.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L449-L505】
-  `EasySwapperV2.setdHedgePoolFactory()` / `setSwapper()` — задаёт фабрику пулов и роутер свопов, что определяет маршруты движения активов.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L461-L477】
+  `EasySwapperV2.setAuthorizedWithdrawers()` — easySwapperOwner решает, кто завершает выводы через EasySwapper, влияя на выпуск активов из пулов.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L479-L485】
+  `EasySwapperV2.setCustomCooldownWhitelist()` и `setCustomCooldown()` — easySwapperOwner регулирует возможность депозитов с пониженным кулдауном, влияя на ликвидность пулов.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L449-L505】
+  `EasySwapperV2.setdHedgePoolFactory()` / `setSwapper()` — easySwapperOwner задаёт фабрику пулов и роутер свопов, что определяет маршруты движения активов.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L461-L477】
 
 * Права по настройкам протокола
-  Управление whitelists и параметрами кулдауна/сваппера относится к настройкам пользовательских выводов.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L449-L505】
+  Управление whitelists и параметрами кулдауна/сваппера easySwapperOwner относится к настройкам пользовательских выводов.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L449-L505】
 
 * Доступ к деньгам пользователей
   1. Прямого вывода активов нет.
-  2. Может назначить доверенных withdrawer-ов, которые завершают выводы и маршрутизируют активы пользователей.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L479-L485】【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L334-L345】
+  2. easySwapperOwner может назначить доверенных withdrawer-ов, которые завершают выводы и маршрутизируют активы пользователей.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L479-L485】【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L334-L345】
   3. Минтинг наград не предусмотрен.
 
 * Жёсткие ограничения
-  Whitelist для кастомного кулдауна проверяет, что адрес является пулом dHEDGE и что entry fee не ниже 0.1%.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L86-L101】【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L449-L456】
+  Whitelist для кастомного кулдауна easySwapperOwner проверяет, что адрес является пулом dHEDGE и что entry fee не ниже 0.1%.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L86-L101】【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L449-L456】
 
-#### owner (PoolLimitOrderManager)
+#### limitOrderManagerOwner
 
 * Права по управлению активами пула
-  `PoolLimitOrderManager.addAuthorizedKeeper()` / `removeAuthorizedKeeper()` — выбирает keepers, которые могут исполнять лимитные ордера и перемещать активы через EasySwapper.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L504-L518】
+  `PoolLimitOrderManager.addAuthorizedKeeper()` / `removeAuthorizedKeeper()` — limitOrderManagerOwner выбирает keepers, которые могут исполнять лимитные ордера и перемещать активы через EasySwapper.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L504-L518】
 
 * Права по настройкам протокола
-  `PoolLimitOrderManager.setDefaultSlippageTolerance()` / `setPoolFactory()` / `setEasySwapper()` / `setLimitOrderSettlementToken()` — настраивает параметры исполнения ордеров и актив расчётов.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L520-L541】
+  `PoolLimitOrderManager.setDefaultSlippageTolerance()` / `setPoolFactory()` / `setEasySwapper()` / `setLimitOrderSettlementToken()` — limitOrderManagerOwner настраивает параметры исполнения ордеров и актив расчётов.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L520-L541】
 
 * Доступ к деньгам пользователей
   1. Прямого вывода нет.
-  2. Может назначать keeper-ов, которые затем управляют исполнением ордеров пользователей.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L504-L541】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L212-L265】
+  2. limitOrderManagerOwner может назначать keeper-ов, которые затем управляют исполнением ордеров пользователей.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L504-L541】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L212-L265】
   3. Минтинг наград не предусмотрен.
 
 * Жёсткие ограничения
   Установка адресов сопровождается проверками на валидность (например, при установке settlement токена вызывается проверка через фабрику).【F:contracts/limitOrders/PoolLimitOrderManager.sol†L520-L541】
 
-#### owner (DhedgeEasySwapper)
+#### dhedgeEasySwapperOwner
 
 * Права по управлению активами пула
-  `DhedgeEasySwapper.setWithdrawProps()` и `setSwapRouter()` — управляет логикой вывода и свопа при депозитах/выводах через обёртку.【F:contracts/swappers/easySwapper/DhedgeEasySwapper.sol†L74-L84】
-  `DhedgeEasySwapper.setPoolAllowed()` — определяет, какие пулы могут использовать кастомный кулдаун при депозитах через контракт.【F:contracts/swappers/easySwapper/DhedgeEasySwapper.sol†L86-L91】
+  `DhedgeEasySwapper.setWithdrawProps()` и `setSwapRouter()` — dhedgeEasySwapperOwner управляет логикой вывода и свопа при депозитах/выводах через обёртку.【F:contracts/swappers/easySwapper/DhedgeEasySwapper.sol†L74-L84】
+  `DhedgeEasySwapper.setPoolAllowed()` — dhedgeEasySwapperOwner определяет, какие пулы могут использовать кастомный кулдаун при депозитах через контракт.【F:contracts/swappers/easySwapper/DhedgeEasySwapper.sol†L86-L91】
 
 * Права по настройкам протокола
-  `DhedgeEasySwapper.setFee()` / `setFeeSink()` / `setManagerFeeBypass()` — задаёт и распределяет комиссии обёртки.【F:contracts/swappers/easySwapper/DhedgeEasySwapper.sol†L93-L114】
+  `DhedgeEasySwapper.setFee()` / `setFeeSink()` / `setManagerFeeBypass()` — dhedgeEasySwapperOwner задаёт и распределяет комиссии обёртки.【F:contracts/swappers/easySwapper/DhedgeEasySwapper.sol†L93-L114】
 
 * Доступ к деньгам пользователей
-  1. `salvage()` позволяет вывести все ETH, накопленные в контракте, напрямую владельцу.【F:contracts/swappers/easySwapper/DhedgeEasySwapper.sol†L116-L118】
-  2. Может назначать адреса с обходом комиссии, что меняет финансовые потоки пользователей.【F:contracts/swappers/easySwapper/DhedgeEasySwapper.sol†L109-L114】
-  3. Устанавливая ненулевую комиссию и сборщика, владелец получает вознаграждение с депозитов.【F:contracts/swappers/easySwapper/DhedgeEasySwapper.sol†L93-L107】
+  1. `salvage()` позволяет dhedgeEasySwapperOwner вывести все ETH, накопленные в контракте, напрямую dhedgeEasySwapperOwner.【F:contracts/swappers/easySwapper/DhedgeEasySwapper.sol†L116-L118】
+  2. dhedgeEasySwapperOwner может назначать адреса с обходом комиссии, что меняет финансовые потоки пользователей.【F:contracts/swappers/easySwapper/DhedgeEasySwapper.sol†L109-L114】
+  3. Устанавливая ненулевую комиссию и сборщика, dhedgeEasySwapperOwner получает вознаграждение с депозитов.【F:contracts/swappers/easySwapper/DhedgeEasySwapper.sol†L93-L107】
 
 * Жёсткие ограничения
-  Комиссия проверяется на условие `feeDenominator >= feeNumerator`, иначе транзакция отклоняется.【F:contracts/swappers/easySwapper/DhedgeEasySwapper.sol†L97-L101】
+  Комиссия, которую задаёт dhedgeEasySwapperOwner, проверяется на условие `feeDenominator >= feeNumerator`, иначе транзакция отклоняется.【F:contracts/swappers/easySwapper/DhedgeEasySwapper.sol†L97-L101】
 
-#### owner (PoolTokenSwapper)
+#### poolTokenSwapperOwner
 
 * Права по управлению активами пула
-  `PoolTokenSwapper.setAssets()` и `setPools()` — определяет, какие активы и пулы доступны для свопов через контракт.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L276-L288】
-  `PoolTokenSwapper.setManager()` — назначает адрес, который сможет проводить произвольные транзакции через `execTransaction`.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L290-L295】
-  `PoolTokenSwapper.setSwapWhitelist()` — контролирует список адресов, которые могут выполнять свопы активов и долей пулов.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L297-L302】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L98-L101】
+  `PoolTokenSwapper.setAssets()` и `setPools()` — poolTokenSwapperOwner определяет, какие активы и пулы доступны для свопов через контракт.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L276-L288】
+  `PoolTokenSwapper.setManager()` — poolTokenSwapperOwner назначает адрес, который сможет проводить произвольные транзакции через `execTransaction`.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L290-L295】
+  `PoolTokenSwapper.setSwapWhitelist()` — poolTokenSwapperOwner контролирует список адресов, которые могут выполнять свопы активов и долей пулов.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L297-L302】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L98-L101】
 
 * Права по настройкам протокола
-  Управление конфигурацией активов, пулов и whitelist-ов определяет все параметры работы своппера.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L276-L302】
+  Управление конфигурацией активов, пулов и whitelist-ов poolTokenSwapperOwner определяет все параметры работы своппера.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L276-L302】
 
 * Доступ к деньгам пользователей
-  1. `salvage()` позволяет вывести любые токены, находящиеся на балансе своппера, в пользу владельца.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L304-L309】
-  2. Может назначать менеджера и whitelist адресов, которые затем будут перемещать активы пулов через своппер.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L228-L272】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L276-L302】
+  1. `salvage()` позволяет poolTokenSwapperOwner вывести любые токены, находящиеся на балансе своппера, в пользу poolTokenSwapperOwner.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L304-L309】
+  2. poolTokenSwapperOwner может назначать менеджера и whitelist адресов, которые затем будут перемещать активы пулов через своппер.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L228-L272】【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L276-L302】
   3. Минтинг вознаграждений не предусмотрен.
 
 * Жёсткие ограничения
-  При выполнении `execTransaction` менеджер проходит guard-проверки на whitelist активов и пулов, что ограничивает произвольный вывод средств.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L230-L272】
+  При выполнении `execTransaction` менеджер, назначенный poolTokenSwapperOwner, проходит guard-проверки на whitelist активов и пулов, что ограничивает произвольный вывод средств.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L230-L272】
 
-#### manager
+#### poolManager
 
 * Права по управлению активами пула
   `PoolLogic.execTransaction()` / `execTransactions()` — менеджер выполняет сделки от имени пула через guard-ы.【F:contracts/PoolLogic.sol†L620-L673】
@@ -165,7 +165,7 @@
 * Жёсткие ограничения
   Действует только в рамках guard-ов и пока менеджер не отключил возможность менять активы трейдеру.【F:contracts/PoolLogic.sol†L620-L641】【F:contracts/PoolManagerLogic.sol†L516-L520】
 
-#### investor / LP
+#### investor
 
 * Права по управлению активами пула
   `PoolLogic.deposit()` / `depositFor()` — вносит средства и получает долевые токены.【F:contracts/PoolLogic.sol†L222-L238】
@@ -182,7 +182,7 @@
 * Жёсткие ограничения
   Депозит требует членства для приватных пулов, whitelist активов и минимального депозита; вывод возможен после кулдауна и с проверкой слippage/инвариантов.【F:contracts/PoolLogic.sol†L260-L347】【F:contracts/PoolLogic.sol†L412-L505】
 
-#### authorized withdrawer (EasySwapperV2)
+#### authorizedWithdrawer
 
 * Права по управлению активами пула
   `EasySwapperV2.completeLimitOrderWithdrawalFor()` — завершает выводы из пулов, переводя активы или settlement токен пользователю.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L334-L345】
@@ -196,9 +196,9 @@
   3. Минтинг вознаграждений не предусмотрен.
 
 * Жёсткие ограничения
-  Доступ возможен только при нахождении в whitelist owner-а EasySwapperV2.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L97-L101】【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L479-L485】
+  Доступ возможен только при нахождении в whitelist, который ведёт easySwapperOwner.【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L97-L101】【F:contracts/swappers/easySwapperV2/EasySwapperV2.sol†L479-L485】
 
-#### authorized keeper (PoolLimitOrderManager)
+#### authorizedKeeper
 
 * Права по управлению активами пула
   `PoolLimitOrderManager.executeLimitOrders()` / `executeSettlementOrders()` — keeper исполняет лимитные и settlement ордера, перемещая долевые токены и вызывая EasySwapper для конвертации в базовые активы.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L212-L381】
@@ -214,10 +214,10 @@
 * Жёсткие ограничения
   Требует whitelist в контракте и проходит проверки цены, допустимого slippage и соответствия settlement токена.【F:contracts/limitOrders/PoolLimitOrderManager.sol†L135-L265】【F:contracts/limitOrders/PoolLimitOrderManager.sol†L320-L378】
 
-#### swapWhitelist (PoolTokenSwapper)
+#### swapWhitelist
 
 * Права по управлению активами пула
-  `PoolTokenSwapper.swap()` — whitelisted адресы могут обменивать активы и доли пулов по настройкам владельца своппера.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L137-L225】
+  `PoolTokenSwapper.swap()` — whitelisted адресы могут обменивать активы и доли пулов по настройкам, которые задаёт poolTokenSwapperOwner.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L137-L225】
 
 * Права по настройкам протокола
   Не найдено в коде.
@@ -228,9 +228,11 @@
   3. Минтинг наград не предусмотрен.
 
 * Жёсткие ограничения
-  Свопы возможны только по заранее включённым активам/пулам и при соблюдении minAmountOut; все операции идут через `whenNotPaused` и whitelist владельца.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L137-L225】
+  Свопы возможны только по заранее включённым активам/пулам и при соблюдении minAmountOut; все операции идут через `whenNotPaused` и whitelist, который контролирует poolTokenSwapperOwner.【F:contracts/swappers/poolTokenSwapper/PoolTokenSwapper.sol†L137-L225】
 
-#### daoAddress
+#### feeRecipient
+
+feeRecipient — это daoAddress / DAO address, которая получает комиссии через `PoolLogic.mintManagerFee()`.
 
 * Права по управлению активами пула
   Не найдено в коде.
@@ -241,7 +243,7 @@
 * Доступ к деньгам пользователей
   1. Не может напрямую вывести активы пула.
   2. Не назначает другие адреса.
-  3. Получает доли пула при каждом вызове `PoolLogic.mintManagerFee()`, а также может инициировать вызов самостоятельно, так как функция публична.【F:contracts/PoolLogic.sol†L780-L820】
+  3. feeRecipient получает доли пула при каждом вызове `PoolLogic.mintManagerFee()`, а также может инициировать вызов самостоятельно, так как функция публична.【F:contracts/PoolLogic.sol†L780-L820】
 
 * Жёсткие ограничения
   Размер вознаграждения определяется текущими параметрами комиссий пула и настройками DAO fee.【F:contracts/PoolLogic.sol†L780-L820】
@@ -250,17 +252,17 @@
 
 | Роль | Может менять whitelist активов | Может менять ставки комиссий | Может торговать активами пула | Может напрямую вывести активы инвесторов | Может выпускать себе вознаграждение |
 | ---- | ------------------------------ | ---------------------------- | ----------------------------- | ---------------------------------------- | ----------------------------------- |
-| owner (PoolFactory) | да | да | нет | нет | через ограничение: setDAOAddress + mintManagerFee |
-| owner (Governance) | да | нет | нет | нет | нет |
-| owner (AssetHandler) | да | нет | нет | нет | нет |
-| owner (EasySwapperV2) | нет | нет | нет | нет | нет |
-| owner (PoolLimitOrderManager) | нет | нет | нет | нет | нет |
-| owner (DhedgeEasySwapper) | через ограничение: setPoolAllowed | да | нет | да | да |
-| owner (PoolTokenSwapper) | да | да | нет | да | нет |
-| manager | да | через ограничение: announceFeeIncrease → commitFeeIncrease | да | через ограничение: execTransaction под guard | да |
-| trader | через ограничение: если traderAssetChangeDisabled == false | нет | через ограничение: только whitelisted транзакции | нет | нет |
-| investor / LP | нет | нет | нет | через ограничение: вывод своей доли после кулдауна | нет |
-| authorized withdrawer | нет | нет | нет | через ограничение: завершает вывод пользователю | нет |
-| authorized keeper | нет | нет | через ограничение: исполняет limit order через EasySwapper | через ограничение: исполняет ордер в пользу пользователя | нет |
-| swapWhitelist | нет | нет | через ограничение: только включённые активы/пулы | нет | нет |
-| daoAddress | нет | нет | нет | нет | да |
+| poolFactoryOwner | да (через фабрику, setAssetHandler и лимиты активов) | да (через setMaximumFee, setDaoFee, announce/commit delay лимиты) | через ограничение: может менять активы пула и ставить пулы на паузу | нет | через ограничение: назначает daoAddress и вызывает mintManagerFee() |
+| governanceOwner | да (setContractGuard / setAssetGuard) | нет | нет | нет | нет |
+| assetHandlerOwner | да (addAsset / removeAsset) | нет | нет | нет | нет |
+| easySwapperOwner | нет | нет | нет | нет | нет |
+| limitOrderManagerOwner | нет | нет | нет | нет | нет |
+| dhedgeEasySwapperOwner | через ограничение: setPoolAllowed | да (setFee / setFeeSink / setManagerFeeBypass) | нет | да (salvage() может вытянуть накопленное на контракте) | да (через комиссию на вход/выход) |
+| poolTokenSwapperOwner | да (setAssets / setPools / setSwapWhitelist) | нет | нет | да (salvage() забирает токены на балансе контракта) | нет |
+| poolManager | через ограничение: changeAssets() только whitelisted активы и лимиты фабрики | через ограничение: announceFeeIncrease() → commitFeeIncrease() с задержкой | через ограничение: execTransaction() под guard | через ограничение: execTransaction() под guard | да (mintManagerFee() начисляет менеджеру и DAO) |
+| trader | через ограничение: только если traderAssetChangeDisabled == false и актив whitelisted | нет | через ограничение: execTransaction() под guard | нет | нет |
+| investor | нет | нет | нет | через ограничение: может вывести только свою долю после кулдауна | нет |
+| authorizedWithdrawer | нет | нет | нет | через ограничение: completeLimitOrderWithdrawalFor() завершает вывод конкретного пользователя | нет |
+| authorizedKeeper | нет | нет | через ограничение: executeLimitOrders() выполняет ордера в рамках slippage/price-check | через ограничение: исполняет ордер и отправляет результат пользователю | нет |
+| swapWhitelist | нет | нет | через ограничение: swap() только по заранее разрешённым активам/пулам | нет | нет |
+| feeRecipient | нет | нет | нет | нет | через ограничение: может получить доли пула через mintManagerFee() |
